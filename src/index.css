@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+html,
+body {
+  margin: 0;
+  font-family: "Manrope", system-ui, sans-serif;
+  background: #d4c7b0;
+  overscroll-behavior: none;
+}
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+}
