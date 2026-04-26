@@ -8,13 +8,10 @@ import {
   X,
   Check,
   AlertCircle,
-  MessageCircle,
-  Send,
   Settings,
   Inbox,
   CheckCircle2,
   Circle,
-  Calendar,
   RefreshCw,
   MoreHorizontal,
   Wifi,
@@ -22,91 +19,49 @@ import {
   Battery,
   Loader2,
   ChevronDown,
+  Phone,
+  MessageCircle,
+  Tag,
 } from "lucide-react";
 
-// ---------- Seed data (used only on first load before CSV connects) ----------
-const SEED_TASKS = [
-  {
-    id: "t-2401",
-    title: "AHU failure — Food Court",
-    description:
-      "Air handling unit serving the food court is making a grinding noise and not cooling. Three tenants have complained since opening.",
-    property: "Ondangwa Shopping Centre",
-    zone: "Food Court",
-    status: "in_progress",
-    priority: "high",
-    assignee: "Jonas",
-    createdAt: "2026-04-25T08:14:00",
-    dueDate: "2026-04-26T17:00:00",
-    comments: [
-      { author: "Jonas", text: "On site. Inspecting compressor.", time: "09:42" },
-      { author: "Jonas", text: "Capacitor failed. Sourcing from Windhoek.", time: "11:18" },
-    ],
-  },
-  {
-    id: "t-2402",
-    title: "Taxi rank canopy — concrete crack inspection",
-    description:
-      "Tenant reported a hairline crack along the eastern column. Need structural engineer sign-off before next rains.",
-    property: "Oshakati Shopping Centre",
-    zone: "Taxi Rank",
-    status: "pending",
-    priority: "urgent",
-    assignee: "Unassigned",
-    createdAt: "2026-04-26T06:02:00",
-    dueDate: "2026-04-28T17:00:00",
-    comments: [],
-  },
-  {
-    id: "t-2403",
-    title: "Replace soap dispensers — male ablution",
-    description: "All three dispensers have been damaged. Replace with stainless steel units.",
-    property: "44 on Post",
-    zone: "Ground Floor Ablution",
-    status: "pending",
-    priority: "low",
-    assignee: "Jonas",
-    createdAt: "2026-04-24T14:20:00",
-    dueDate: "2026-04-30T17:00:00",
-    comments: [{ author: "Thando", text: "Stainless only — no plastic.", time: "14:22" }],
-  },
-];
+// ---------- CONFIG ----------
+// If your sheet uses different Status values, change these three keys + their labels.
+// Keys must match EXACTLY what appears in the Status column of your sheet.
+const STATUSES = {
+  Pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7" },
+  "In Progress": { label: "In progress", color: "#1D4ED8", bg: "#DBEAFE" },
+  Done: { label: "Done", color: "#15803D", bg: "#DCFCE7" },
+};
+const STATUS_KEYS = Object.keys(STATUSES);
+const DONE_STATUS = "Done";
 
 const TEAM = ["Unassigned", "Jonas", "Thando"];
-const PROPERTIES = [
-  "All properties",
-  "Ondangwa Shopping Centre",
-  "Oshakati Shopping Centre",
-  "44 on Post",
-  "269 Independence Avenue",
-  "Shoprite LiquorShop",
+
+// Fallback tasks shown before the CSV connects
+const SEED_TASKS = [
+  {
+    id: "DEMO-001",
+    title: "Configure CSV URL in Settings to load real tasks",
+    property: "Demo Property",
+    category: "Setup",
+    assignee: "Thando",
+    phone: "",
+    status: "Pending",
+    dueDate: new Date().toISOString().slice(0, 10),
+  },
 ];
 
-const STATUSES = {
-  pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7" },
-  in_progress: { label: "In progress", color: "#1D4ED8", bg: "#DBEAFE" },
-  completed: { label: "Completed", color: "#15803D", bg: "#DCFCE7" },
-};
-const PRIORITIES = {
-  low: { label: "Low", color: "#6B7280" },
-  medium: { label: "Medium", color: "#0F766E" },
-  high: { label: "High", color: "#C2410C" },
-  urgent: { label: "Urgent", color: "#B91C1C" },
-};
-
 // ---------- Helpers ----------
-const fmtDue = (iso) => {
-  if (!iso) return { text: "—", overdue: false };
-  const d = new Date(iso);
+const fmtDue = (val) => {
+  if (!val) return { text: "—" };
+  const d = new Date(val);
+  if (isNaN(d)) return { text: String(val) };
   const now = new Date();
   const diff = (d - now) / (1000 * 60 * 60);
   const day = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  if (diff < -24) return { text: `Overdue · ${day}`, overdue: true };
   if (diff < 0) return { text: `Overdue · ${day}`, overdue: true };
-  if (diff < 24)
-    return {
-      text: `Due today · ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-      urgent: true,
-    };
+  if (diff < 24) return { text: `Due soon · ${day}`, urgent: true };
   if (diff < 48) return { text: `Tomorrow · ${day}` };
   return { text: day };
 };
@@ -120,7 +75,6 @@ const timeAgo = (iso) => {
   return `${Math.floor(hrs / 24)}d ago`;
 };
 
-// localStorage-backed state hook
 function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(() => {
     try {
@@ -138,29 +92,33 @@ function usePersistedState(key, defaultValue) {
   return [state, setState];
 }
 
-// CSV row → task object
+// CSV row → task object (column names = sheet headers exactly)
 const rowToTask = (row) => ({
-  id: row.id,
-  title: row.title || "",
-  description: row.description || "",
-  property: row.property || "",
-  zone: row.zone || "",
-  status: row.status || "pending",
-  priority: row.priority || "medium",
-  assignee: row.assignee || "Unassigned",
-  createdAt: row.createdAt || new Date().toISOString(),
-  dueDate: row.dueDate || new Date().toISOString(),
-  comments: (() => {
-    try {
-      const parsed = JSON.parse(row.comments || "[]");
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  })(),
+  id: row["Task ID"] || "",
+  title: row["Task Description"] || "",
+  property: row["Property"] || "",
+  category: row["Category"] || "",
+  assignee: row["Assigned To"] || "Unassigned",
+  phone: row["Phone Number"] || "",
+  status: STATUS_KEYS.includes(row["Status"]) ? row["Status"] : "Pending",
+  dueDate: row["Due Date"] || "",
 });
 
-// ---------- Main component ----------
+// Generate a new task ID from property prefix
+const nextIdFor = (property, tasks) => {
+  const prefix = (property || "TASK")
+    .replace(/[^A-Za-z]/g, "")
+    .slice(0, 3)
+    .toUpperCase() || "TASK";
+  const nums = tasks
+    .filter((t) => t.id && t.id.startsWith(prefix + "-"))
+    .map((t) => parseInt(t.id.split("-")[1], 10))
+    .filter((n) => !isNaN(n));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  return `${prefix}-${String(next).padStart(3, "0")}`;
+};
+
+// ---------- Main ----------
 export default function App() {
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
   const [csvUrl, setCsvUrl] = usePersistedState("ops.csvUrl", "");
@@ -176,19 +134,27 @@ export default function App() {
   const [syncError, setSyncError] = useState("");
   const [now, setNow] = useState(new Date());
 
-  // Live clock
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(t);
   }, []);
 
-  // Auto-fetch on mount if URL is configured
   useEffect(() => {
     if (csvUrl) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Filtered list
+  // Properties + categories derived from data
+  const propertyOptions = useMemo(() => {
+    const set = new Set(tasks.map((t) => t.property).filter(Boolean));
+    return ["All properties", ...Array.from(set).sort()];
+  }, [tasks]);
+
+  const categoryOptions = useMemo(() => {
+    const set = new Set(tasks.map((t) => t.category).filter(Boolean));
+    return Array.from(set).sort();
+  }, [tasks]);
+
   const filtered = useMemo(() => {
     return tasks
       .filter((t) => activeStatus === "all" || t.status === activeStatus)
@@ -196,15 +162,18 @@ export default function App() {
       .filter((t) =>
         search.trim() === ""
           ? true
-          : (t.title + t.description + t.property + t.zone)
+          : (t.title + t.property + t.category + t.assignee)
               .toLowerCase()
               .includes(search.toLowerCase())
       )
       .sort((a, b) => {
-        const order = { urgent: 0, high: 1, medium: 2, low: 3 };
-        if (a.status === "completed" && b.status !== "completed") return 1;
-        if (b.status === "completed" && a.status !== "completed") return -1;
-        return (order[a.priority] ?? 9) - (order[b.priority] ?? 9);
+        const aDone = a.status === DONE_STATUS;
+        const bDone = b.status === DONE_STATUS;
+        if (aDone && !bDone) return 1;
+        if (bDone && !aDone) return -1;
+        const aDate = new Date(a.dueDate || "9999-12-31");
+        const bDate = new Date(b.dueDate || "9999-12-31");
+        return aDate - bDate;
       });
   }, [tasks, activeStatus, activeProperty, search]);
 
@@ -213,15 +182,13 @@ export default function App() {
       activeProperty === "All properties"
         ? tasks
         : tasks.filter((t) => t.property === activeProperty);
-    return {
-      all: props.length,
-      pending: props.filter((t) => t.status === "pending").length,
-      in_progress: props.filter((t) => t.status === "in_progress").length,
-      completed: props.filter((t) => t.status === "completed").length,
-    };
+    const c = { all: props.length };
+    STATUS_KEYS.forEach((k) => {
+      c[k] = props.filter((t) => t.status === k).length;
+    });
+    return c;
   }, [tasks, activeProperty]);
 
-  // POST change to webhook (fire-and-forget; UI updates optimistically)
   const pushChange = (payload) => {
     if (!webhookUrl) return;
     fetch(webhookUrl, {
@@ -237,28 +204,9 @@ export default function App() {
     pushChange({ action: "update", id, patch });
   };
 
-  const addComment = (id, text) => {
-    const c = {
-      author: "Thando",
-      text,
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, comments: [...t.comments, c] } : t))
-    );
-    setOpenTask((cur) =>
-      cur && cur.id === id ? { ...cur, comments: [...cur.comments, c] } : cur
-    );
-    pushChange({ action: "comment", id, comment: c });
-  };
-
   const addTask = (data) => {
-    const t = {
-      id: `t-${Date.now().toString(36).slice(-5)}`,
-      ...data,
-      createdAt: new Date().toISOString(),
-      comments: [],
-    };
+    const id = data.id || nextIdFor(data.property, tasks);
+    const t = { id, ...data };
     setTasks((prev) => [t, ...prev]);
     pushChange({ action: "create", task: t });
   };
@@ -266,14 +214,12 @@ export default function App() {
   const refresh = async () => {
     setSyncError("");
     setSyncing(true);
-
     if (!csvUrl) {
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 400));
       setLastSync(new Date().toISOString());
       setSyncing(false);
       return;
     }
-
     try {
       const res = await fetch(csvUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -370,7 +316,11 @@ export default function App() {
             </div>
           </div>
 
-          <PropertyDropdown value={activeProperty} onChange={setActiveProperty} />
+          <PropertyDropdown
+            value={activeProperty}
+            onChange={setActiveProperty}
+            options={propertyOptions}
+          />
 
           <div
             className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl"
@@ -392,43 +342,39 @@ export default function App() {
           </div>
         </div>
 
-        {/* Status filter pills */}
+        {/* Status pills */}
         <div
           className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide"
           style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}
         >
-          {[
-            { key: "all", label: "All", count: counts.all },
-            { key: "pending", label: "Pending", count: counts.pending },
-            { key: "in_progress", label: "Active", count: counts.in_progress },
-            { key: "completed", label: "Done", count: counts.completed },
-          ].map((p) => (
-            <button
-              key={p.key}
-              onClick={() => setActiveStatus(p.key)}
-              className="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all active:scale-95"
-              style={{
-                background: activeStatus === p.key ? "#0F0F0F" : "white",
-                color: activeStatus === p.key ? "white" : "#0F0F0F",
-                border: "1px solid rgba(0,0,0,0.08)",
-              }}
-            >
-              {p.label}
-              <span
-                className="px-1.5 rounded-full"
+          {[{ key: "all", label: "All" }, ...STATUS_KEYS.map((k) => ({ key: k, label: STATUSES[k].label }))].map(
+            (p) => (
+              <button
+                key={p.key}
+                onClick={() => setActiveStatus(p.key)}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all active:scale-95"
                 style={{
-                  fontSize: "10px",
-                  background:
-                    activeStatus === p.key ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.05)",
+                  background: activeStatus === p.key ? "#0F0F0F" : "white",
+                  color: activeStatus === p.key ? "white" : "#0F0F0F",
+                  border: "1px solid rgba(0,0,0,0.08)",
                 }}
               >
-                {p.count}
-              </span>
-            </button>
-          ))}
+                {p.label}
+                <span
+                  className="px-1.5 rounded-full"
+                  style={{
+                    fontSize: "10px",
+                    background:
+                      activeStatus === p.key ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.05)",
+                  }}
+                >
+                  {counts[p.key] ?? 0}
+                </span>
+              </button>
+            )
+          )}
         </div>
 
-        {/* Sync error banner */}
         {syncError && (
           <div
             className="px-5 py-2 text-xs flex items-center gap-2"
@@ -478,7 +424,7 @@ export default function App() {
                   onClick={() => setOpenTask(t)}
                   onToggle={() =>
                     updateTask(t.id, {
-                      status: t.status === "completed" ? "pending" : "completed",
+                      status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS,
                     })
                   }
                 />
@@ -487,7 +433,6 @@ export default function App() {
           )}
         </div>
 
-        {/* FAB */}
         <button
           onClick={() => setNewTaskOpen(true)}
           className="absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95"
@@ -505,12 +450,14 @@ export default function App() {
             task={openTask}
             onClose={() => setOpenTask(null)}
             onUpdate={(patch) => updateTask(openTask.id, patch)}
-            onComment={(text) => addComment(openTask.id, text)}
           />
         )}
 
         {newTaskOpen && (
           <NewTaskSheet
+            propertyOptions={propertyOptions.filter((p) => p !== "All properties")}
+            categoryOptions={categoryOptions}
+            tasks={tasks}
             onClose={() => setNewTaskOpen(false)}
             onCreate={(data) => {
               addTask(data);
@@ -540,9 +487,8 @@ export default function App() {
 // ---------- Task card ----------
 function TaskCard({ task, onClick, onToggle }) {
   const due = fmtDue(task.dueDate);
-  const status = STATUSES[task.status] || STATUSES.pending;
-  const priority = PRIORITIES[task.priority] || PRIORITIES.medium;
-  const done = task.status === "completed";
+  const status = STATUSES[task.status] || STATUSES.Pending;
+  const done = task.status === DONE_STATUS;
 
   return (
     <div
@@ -570,22 +516,7 @@ function TaskCard({ task, onClick, onToggle }) {
         </button>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: priority.color }}
-            />
-            <span
-              className="uppercase font-semibold"
-              style={{
-                color: priority.color,
-                fontSize: "10px",
-                letterSpacing: "0.1em",
-              }}
-            >
-              {priority.label}
-            </span>
-            <span style={{ color: "#D4C7B0" }}>·</span>
+          <div className="flex items-center gap-2 mb-1.5">
             <span
               className="px-1.5 py-0.5 rounded-md font-semibold uppercase"
               style={{
@@ -597,6 +528,14 @@ function TaskCard({ task, onClick, onToggle }) {
             >
               {status.label}
             </span>
+            {task.category && (
+              <span
+                className="text-xs"
+                style={{ color: "#8A7A5C" }}
+              >
+                {task.category}
+              </span>
+            )}
           </div>
 
           <h3
@@ -624,26 +563,15 @@ function TaskCard({ task, onClick, onToggle }) {
                 {task.assignee}
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              {task.comments.length > 0 && (
-                <span
-                  className="flex items-center gap-1 text-xs"
-                  style={{ color: "#8A7A5C" }}
-                >
-                  <MessageCircle size={11} />
-                  {task.comments.length}
-                </span>
-              )}
-              <span
-                className="flex items-center gap-1 text-xs font-medium"
-                style={{
-                  color: due.overdue ? "#B91C1C" : due.urgent ? "#C2410C" : "#8A7A5C",
-                }}
-              >
-                <Clock size={11} />
-                {due.text}
-              </span>
-            </div>
+            <span
+              className="flex items-center gap-1 text-xs font-medium"
+              style={{
+                color: due.overdue ? "#B91C1C" : due.urgent ? "#C2410C" : "#8A7A5C",
+              }}
+            >
+              <Clock size={11} />
+              {due.text}
+            </span>
           </div>
         </div>
       </div>
@@ -653,15 +581,21 @@ function TaskCard({ task, onClick, onToggle }) {
 
 function Avatar({ name, size = 24 }) {
   const initials =
-    name === "Unassigned"
+    !name || name === "Unassigned"
       ? "?"
-      : (name || "")
+      : name
           .split(" ")
           .map((n) => n[0])
           .join("")
           .slice(0, 2);
   const bg =
-    name === "Unassigned" ? "#E8DFD0" : name === "Jonas" ? "#0F4C5C" : "#7C2D12";
+    !name || name === "Unassigned"
+      ? "#E8DFD0"
+      : name === "Jonas"
+      ? "#0F4C5C"
+      : name === "Thando"
+      ? "#7C2D12"
+      : "#374151";
   return (
     <div
       className="rounded-full flex items-center justify-center font-semibold"
@@ -669,7 +603,7 @@ function Avatar({ name, size = 24 }) {
         width: size,
         height: size,
         background: bg,
-        color: name === "Unassigned" ? "#8A7A5C" : "white",
+        color: !name || name === "Unassigned" ? "#8A7A5C" : "white",
         fontSize: size * 0.42,
       }}
     >
@@ -678,7 +612,7 @@ function Avatar({ name, size = 24 }) {
   );
 }
 
-function PropertyDropdown({ value, onChange }) {
+function PropertyDropdown({ value, onChange, options }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -693,7 +627,7 @@ function PropertyDropdown({ value, onChange }) {
       >
         <span className="flex items-center gap-2 truncate">
           <MapPin size={14} style={{ color: "#8A7A5C" }} />
-          {value}
+          <span className="truncate">{value}</span>
         </span>
         <ChevronDown
           size={14}
@@ -706,14 +640,14 @@ function PropertyDropdown({ value, onChange }) {
       </button>
       {open && (
         <div
-          className="absolute top-full mt-2 left-0 right-0 rounded-xl overflow-hidden z-20 fade-anim"
+          className="absolute top-full mt-2 left-0 right-0 rounded-xl overflow-hidden z-20 fade-anim max-h-72 overflow-y-auto"
           style={{
             background: "white",
             border: "1px solid rgba(0,0,0,0.06)",
             boxShadow: "0 12px 30px -10px rgba(0,0,0,0.2)",
           }}
         >
-          {PROPERTIES.map((p) => (
+          {options.map((p) => (
             <button
               key={p}
               onClick={() => {
@@ -736,18 +670,15 @@ function PropertyDropdown({ value, onChange }) {
   );
 }
 
-function TaskDetailSheet({ task, onClose, onUpdate, onComment }) {
-  const [comment, setComment] = useState("");
+function TaskDetailSheet({ task, onClose, onUpdate }) {
   const due = fmtDue(task.dueDate);
-  const status = STATUSES[task.status] || STATUSES.pending;
-  const priority = PRIORITIES[task.priority] || PRIORITIES.medium;
+  const status = STATUSES[task.status] || STATUSES.Pending;
 
-  const submitComment = () => {
-    if (comment.trim()) {
-      onComment(comment.trim());
-      setComment("");
-    }
-  };
+  const waLink = task.phone
+    ? `https://wa.me/${task.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(
+        `Hi ${task.assignee}, regarding ${task.id}: ${task.title}`
+      )}`
+    : null;
 
   return (
     <div
@@ -786,8 +717,8 @@ function TaskDetailSheet({ task, onClose, onUpdate, onComment }) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 scrollbar-hide">
-          <div className="flex gap-2 mb-3">
+        <div className="flex-1 overflow-y-auto px-5 scrollbar-hide pb-6">
+          <div className="flex gap-2 mb-3 flex-wrap">
             <span
               className="px-2 py-1 rounded-md font-semibold uppercase"
               style={{
@@ -799,43 +730,37 @@ function TaskDetailSheet({ task, onClose, onUpdate, onComment }) {
             >
               {status.label}
             </span>
-            <span
-              className="px-2 py-1 rounded-md font-semibold uppercase"
-              style={{
-                fontSize: "10px",
-                background: "white",
-                color: priority.color,
-                border: `1px solid ${priority.color}33`,
-                letterSpacing: "0.05em",
-              }}
-            >
-              {priority.label} priority
-            </span>
+            {task.category && (
+              <span
+                className="px-2 py-1 rounded-md font-semibold uppercase flex items-center gap-1"
+                style={{
+                  fontSize: "10px",
+                  background: "white",
+                  color: "#374151",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                <Tag size={10} />
+                {task.category}
+              </span>
+            )}
           </div>
 
           <h2
-            className="font-display text-2xl leading-tight mb-3"
+            className="font-display text-2xl leading-tight mb-4"
             style={{ color: "#0F0F0F", fontWeight: 500 }}
           >
             {task.title}
           </h2>
 
-          <p className="text-sm leading-relaxed mb-5" style={{ color: "#3F3A2E" }}>
-            {task.description}
-          </p>
-
           <div
             className="rounded-2xl mb-4"
             style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}
           >
-            <DetailRow icon={<MapPin size={14} />} label="Location">
-              <div>
-                <div className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>
-                  {task.property}
-                </div>
-                <div className="text-xs" style={{ color: "#8A7A5C" }}>
-                  {task.zone}
-                </div>
+            <DetailRow icon={<MapPin size={14} />} label="Property">
+              <div className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>
+                {task.property || "—"}
               </div>
             </DetailRow>
 
@@ -848,16 +773,27 @@ function TaskDetailSheet({ task, onClose, onUpdate, onComment }) {
               </div>
             </DetailRow>
 
-            <DetailRow icon={<Calendar size={14} />} label="Created" border>
-              <div className="text-sm" style={{ color: "#0F0F0F" }}>
-                {new Date(task.createdAt).toLocaleString("en-GB", {
-                  day: "numeric",
-                  month: "short",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </div>
-            </DetailRow>
+            {task.phone && (
+              <DetailRow icon={<Phone size={14} />} label="Phone" border>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm" style={{ color: "#0F0F0F" }}>
+                    {task.phone}
+                  </span>
+                  {waLink && (
+                    <a
+                      href={waLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
+                      style={{ background: "#25D366", color: "white" }}
+                    >
+                      <MessageCircle size={11} />
+                      WhatsApp
+                    </a>
+                  )}
+                </div>
+              </DetailRow>
+            )}
           </div>
 
           <div className="mb-4">
@@ -886,7 +822,7 @@ function TaskDetailSheet({ task, onClose, onUpdate, onComment }) {
             </div>
           </div>
 
-          <div className="mb-5">
+          <div className="mb-2">
             <p
               className="uppercase mb-2"
               style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}
@@ -894,89 +830,26 @@ function TaskDetailSheet({ task, onClose, onUpdate, onComment }) {
               Status
             </p>
             <div className="flex gap-2">
-              {Object.entries(STATUSES).map(([key, s]) => (
-                <button
-                  key={key}
-                  onClick={() => onUpdate({ status: key })}
-                  className="flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition active:scale-95"
-                  style={{
-                    background: task.status === key ? s.color : "white",
-                    color: task.status === key ? "white" : s.color,
-                    border: `1px solid ${task.status === key ? s.color : "rgba(0,0,0,0.06)"}`,
-                  }}
-                >
-                  {s.label}
-                </button>
-              ))}
+              {STATUS_KEYS.map((key) => {
+                const s = STATUSES[key];
+                return (
+                  <button
+                    key={key}
+                    onClick={() => onUpdate({ status: key })}
+                    className="flex-1 px-3 py-2 rounded-xl text-xs font-semibold transition active:scale-95"
+                    style={{
+                      background: task.status === key ? s.color : "white",
+                      color: task.status === key ? "white" : s.color,
+                      border: `1px solid ${
+                        task.status === key ? s.color : "rgba(0,0,0,0.06)"
+                      }`,
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
             </div>
-          </div>
-
-          <div className="mb-4">
-            <p
-              className="uppercase mb-3"
-              style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}
-            >
-              Activity ({task.comments.length})
-            </p>
-            <div className="space-y-3">
-              {task.comments.length === 0 ? (
-                <p className="text-sm italic" style={{ color: "#8A7A5C" }}>
-                  No activity yet.
-                </p>
-              ) : (
-                task.comments.map((c, i) => (
-                  <div key={i} className="flex gap-3">
-                    <Avatar name={c.author} size={28} />
-                    <div
-                      className="flex-1 rounded-2xl rounded-tl-sm px-3 py-2"
-                      style={{
-                        background: "white",
-                        border: "1px solid rgba(0,0,0,0.05)",
-                      }}
-                    >
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-xs font-semibold" style={{ color: "#0F0F0F" }}>
-                          {c.author}
-                        </span>
-                        <span style={{ color: "#8A7A5C", fontSize: "10px" }}>{c.time}</span>
-                      </div>
-                      <p className="text-sm" style={{ color: "#3F3A2E" }}>
-                        {c.text}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="px-5 py-3"
-          style={{ background: "#FAF6EE", borderTop: "1px solid rgba(0,0,0,0.06)" }}
-        >
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded-xl"
-            style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}
-          >
-            <input
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitComment()}
-              placeholder="Add a note..."
-              className="flex-1 bg-transparent outline-none text-sm"
-              style={{ color: "#0F0F0F" }}
-            />
-            <button
-              onClick={submitComment}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition active:scale-90"
-              style={{
-                background: comment.trim() ? "#0F0F0F" : "#E8DFD0",
-                color: comment.trim() ? "white" : "#8A7A5C",
-              }}
-            >
-              <Send size={14} />
-            </button>
           </div>
         </div>
       </div>
@@ -1009,13 +882,13 @@ function DetailRow({ icon, label, children, border }) {
   );
 }
 
-function NewTaskSheet({ onClose, onCreate }) {
+function NewTaskSheet({ propertyOptions, categoryOptions, tasks, onClose, onCreate }) {
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [property, setProperty] = useState(PROPERTIES[1]);
-  const [zone, setZone] = useState("");
-  const [priority, setPriority] = useState("medium");
+  const [property, setProperty] = useState(propertyOptions[0] || "");
+  const [category, setCategory] = useState(categoryOptions[0] || "");
+  const [customCategory, setCustomCategory] = useState("");
   const [assignee, setAssignee] = useState("Unassigned");
+  const [phone, setPhone] = useState("");
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 2);
@@ -1023,18 +896,18 @@ function NewTaskSheet({ onClose, onCreate }) {
   });
 
   const valid = title.trim() && property;
+  const previewId = property ? nextIdFor(property, tasks) : "—";
 
   const submit = () => {
     if (!valid) return;
     onCreate({
       title: title.trim(),
-      description: description.trim(),
       property,
-      zone: zone.trim() || "—",
-      status: "pending",
-      priority,
+      category: customCategory.trim() || category,
       assignee,
-      dueDate: new Date(dueDate + "T17:00:00").toISOString(),
+      phone: phone.trim(),
+      status: "Pending",
+      dueDate,
     });
   };
 
@@ -1081,21 +954,17 @@ function NewTaskSheet({ onClose, onCreate }) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 scrollbar-hide pb-6">
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Task title"
-            className="w-full bg-transparent outline-none font-display text-2xl mb-3"
-            style={{ color: "#0F0F0F", fontWeight: 500 }}
-          />
+          <p className="text-xs mb-2" style={{ color: "#8A7A5C" }}>
+            ID will be: <span className="font-mono font-semibold" style={{ color: "#0F0F0F" }}>{previewId}</span>
+          </p>
 
           <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe the issue, what's needed, any context..."
-            rows={4}
-            className="w-full bg-transparent outline-none text-sm resize-none mb-4"
-            style={{ color: "#3F3A2E" }}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Describe the task..."
+            rows={3}
+            className="w-full bg-transparent outline-none font-display text-xl mb-4 resize-none"
+            style={{ color: "#0F0F0F", fontWeight: 500 }}
           />
 
           <FieldGroup label="Property">
@@ -1105,17 +974,41 @@ function NewTaskSheet({ onClose, onCreate }) {
               className="w-full bg-transparent outline-none text-sm font-medium"
               style={{ color: "#0F0F0F" }}
             >
-              {PROPERTIES.slice(1).map((p) => (
+              {propertyOptions.length === 0 && <option value="">—</option>}
+              {propertyOptions.map((p) => (
                 <option key={p}>{p}</option>
               ))}
             </select>
           </FieldGroup>
 
-          <FieldGroup label="Zone / area">
+          <FieldGroup label="Category">
+            {categoryOptions.length > 0 && (
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full bg-transparent outline-none text-sm font-medium mb-2"
+                style={{ color: "#0F0F0F" }}
+              >
+                {categoryOptions.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            )}
             <input
-              value={zone}
-              onChange={(e) => setZone(e.target.value)}
-              placeholder="e.g. Food Court, Parking, Bay 14"
+              value={customCategory}
+              onChange={(e) => setCustomCategory(e.target.value)}
+              placeholder="Or type a new category..."
+              className="w-full bg-transparent outline-none text-sm"
+              style={{ color: "#0F0F0F" }}
+            />
+          </FieldGroup>
+
+          <FieldGroup label="Phone (for WhatsApp)">
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="e.g. 27711918399"
+              inputMode="tel"
               className="w-full bg-transparent outline-none text-sm font-medium"
               style={{ color: "#0F0F0F" }}
             />
@@ -1133,29 +1026,6 @@ function NewTaskSheet({ onClose, onCreate }) {
 
           <p
             className="uppercase mb-2 mt-4"
-            style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}
-          >
-            Priority
-          </p>
-          <div className="grid grid-cols-4 gap-2 mb-4">
-            {Object.entries(PRIORITIES).map(([key, p]) => (
-              <button
-                key={key}
-                onClick={() => setPriority(key)}
-                className="px-2 py-2 rounded-xl text-xs font-semibold transition active:scale-95"
-                style={{
-                  background: priority === key ? p.color : "white",
-                  color: priority === key ? "white" : p.color,
-                  border: `1px solid ${priority === key ? p.color : "rgba(0,0,0,0.06)"}`,
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <p
-            className="uppercase mb-2"
             style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}
           >
             Assign to
@@ -1302,7 +1172,7 @@ function SettingsSheet({ csvUrl, webhookUrl, onSave, onClose }) {
               />
               <div className="text-xs leading-relaxed" style={{ color: "#0F4C5C" }}>
                 Settings are saved on this device only. Webhook receives JSON with{" "}
-                <code className="font-mono">action</code> (create, update, comment).
+                <code className="font-mono">action</code> (create, update).
               </div>
             </div>
           </div>
