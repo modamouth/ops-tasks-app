@@ -29,6 +29,11 @@ vercel
 
 Follow the prompts. Subsequent deploys: `vercel --prod`.
 
+## Continuous Integration
+
+This repository includes a GitHub Actions workflow at `.github/workflows/ci.yml`.
+It runs on `push` and `pull_request` for `main`, installs dependencies with `npm ci`, and verifies the app builds successfully with `npm run build`.
+
 No environment variables needed. CSV URL and webhook URL are stored in browser localStorage (per device).
 
 ## First-time setup after deploy
