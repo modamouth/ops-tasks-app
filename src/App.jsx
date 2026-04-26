@@ -18,7 +18,9 @@ const STATUSES = {
 };
 const STATUS_KEYS = Object.keys(STATUSES);
 const DONE_STATUS = "Done";
-const TEAM = ["Unassigned", "Jonas", "Thando"];
+
+// Avatar color palette — deterministic per name
+const AVATAR_PALETTE = ["#0F4C5C", "#7C2D12", "#374151", "#5B21B6", "#9F1239", "#065F46", "#9A3412", "#1E3A8A"];
 
 const SEED_TASKS = [
   {
@@ -97,8 +99,8 @@ export default function App() {
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
+  const [sheetTeam, setSheetTeam] = usePersistedState("ops.sheetTeam", []);
 
-  // Env wins; localStorage is fallback for self-hosted/dev
   const csvUrl = ENV_CSV_URL || csvOverride;
   const webhookUrl = ENV_WEBHOOK_URL || webhookOverride;
 
@@ -132,6 +134,15 @@ export default function App() {
     const set = new Set(tasks.map((t) => t.category).filter(Boolean));
     return Array.from(set).sort();
   }, [tasks]);
+
+  const teamOptions = useMemo(() => {
+    if (sheetTeam.length > 0) {
+      return ["Unassigned", ...sheetTeam.filter((t) => t && t !== "Unassigned").sort()];
+    }
+    const set = new Set(tasks.map((t) => t.assignee).filter(Boolean));
+    set.delete("Unassigned");
+    return ["Unassigned", ...Array.from(set).sort()];
+  }, [sheetTeam, tasks]);
 
   const filtered = useMemo(() => {
     return tasks
@@ -196,6 +207,19 @@ export default function App() {
       const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
       const fetched = parsed.data.map(rowToTask).filter((t) => t.id);
       if (fetched.length > 0) setTasks(fetched);
+      
+      // Extract team members from sheet if available
+      const teamSet = new Set();
+      parsed.data.forEach((row) => {
+        if (row["Team Members"]) {
+          const members = row["Team Members"].split(",").map((m) => m.trim()).filter(Boolean);
+          members.forEach((m) => teamSet.add(m));
+        }
+      });
+      if (teamSet.size > 0) {
+        setSheetTeam(Array.from(teamSet));
+      }
+      
       setLastSync(new Date().toISOString());
     } catch (e) {
       setSyncError(e.message || "Fetch failed");
@@ -299,8 +323,24 @@ export default function App() {
           <Plus size={22} strokeWidth={2.5} />
         </button>
 
-        {openTask && <TaskDetailSheet task={openTask} onClose={() => setOpenTask(null)} onUpdate={(patch) => updateTask(openTask.id, patch)} />}
-        {newTaskOpen && <NewTaskSheet propertyOptions={propertyOptions.filter((p) => p !== "All properties")} categoryOptions={categoryOptions} tasks={tasks} onClose={() => setNewTaskOpen(false)} onCreate={(data) => { addTask(data); setNewTaskOpen(false); }} />}
+        {openTask && (
+          <TaskDetailSheet
+            task={openTask}
+            team={teamOptions}
+            onClose={() => setOpenTask(null)}
+            onUpdate={(patch) => updateTask(openTask.id, patch)}
+          />
+        )}
+        {newTaskOpen && (
+          <NewTaskSheet
+            propertyOptions={propertyOptions.filter((p) => p !== "All properties")}
+            categoryOptions={categoryOptions}
+            team={teamOptions}
+            tasks={tasks}
+            onClose={() => setNewTaskOpen(false)}
+            onCreate={(data) => { addTask(data); setNewTaskOpen(false); }}
+          />
+        )}
         {settingsOpen && (
           <SettingsSheet
             envCsvUrl={ENV_CSV_URL}
@@ -353,10 +393,15 @@ function TaskCard({ task, onClick, onToggle }) {
 }
 
 function Avatar({ name, size = 24 }) {
-  const initials = !name || name === "Unassigned" ? "?" : name.split(" ").map((n) => n[0]).join("").slice(0, 2);
-  const bg = !name || name === "Unassigned" ? "#E8DFD0" : name === "Jonas" ? "#0F4C5C" : name === "Thando" ? "#7C2D12" : "#374151";
+  const isUnassigned = !name || name === "Unassigned";
+  const initials = isUnassigned ? "?" : name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+  let bg = "#E8DFD0";
+  if (!isUnassigned) {
+    const sum = [...name].reduce((a, c) => a + c.charCodeAt(0), 0);
+    bg = AVATAR_PALETTE[sum % AVATAR_PALETTE.length];
+  }
   return (
-    <div className="rounded-full flex items-center justify-center font-semibold" style={{ width: size, height: size, background: bg, color: !name || name === "Unassigned" ? "#8A7A5C" : "white", fontSize: size * 0.42 }}>
+    <div className="rounded-full flex items-center justify-center font-semibold" style={{ width: size, height: size, background: bg, color: isUnassigned ? "#8A7A5C" : "white", fontSize: size * 0.42 }}>
       {initials}
     </div>
   );
@@ -384,7 +429,89 @@ function PropertyDropdown({ value, onChange, options }) {
   );
 }
 
-function TaskDetailSheet({ task, onClose, onUpdate }) {
+function AssigneeDropdown({ value, onChange, options, allowCustom }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [showCustom, setShowCustom] = useState(false);
+
+  const commitCustom = () => {
+    if (custom.trim()) {
+      onChange(custom.trim());
+      setCustom("");
+      setShowCustom(false);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-[0.98]"
+        style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)", color: "#0F0F0F" }}
+      >
+        <span className="flex items-center gap-2 truncate">
+          <Avatar name={value} size={20} />
+          <span className="truncate">{value || "Select..."}</span>
+        </span>
+        <ChevronDown size={14} style={{ color: "#8A7A5C", transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms" }} />
+      </button>
+      {open && (
+        <div
+          className="absolute top-full mt-2 left-0 right-0 rounded-xl overflow-hidden z-30 fade-anim max-h-72 overflow-y-auto"
+          style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 12px 30px -10px rgba(0,0,0,0.2)" }}
+        >
+          {options.map((p) => (
+            <button
+              key={p}
+              onClick={() => { onChange(p); setOpen(false); setShowCustom(false); }}
+              className="w-full px-3 py-2.5 text-left text-sm flex items-center justify-between hover:bg-stone-50"
+              style={{ color: "#0F0F0F", background: value === p ? "#FAF6EE" : "white" }}
+            >
+              <span className="flex items-center gap-2 truncate">
+                <Avatar name={p} size={20} />
+                <span className="truncate">{p}</span>
+              </span>
+              {value === p && <Check size={14} style={{ color: "#0F0F0F" }} />}
+            </button>
+          ))}
+          {allowCustom && !showCustom && (
+            <button
+              onClick={() => setShowCustom(true)}
+              className="w-full px-3 py-2.5 text-left text-sm flex items-center gap-2"
+              style={{ color: "#8A7A5C", borderTop: "1px solid rgba(0,0,0,0.05)" }}
+            >
+              <Plus size={14} />
+              Add new person...
+            </button>
+          )}
+          {allowCustom && showCustom && (
+            <div className="px-3 py-2.5 flex gap-2" style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
+              <input
+                autoFocus
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && commitCustom()}
+                placeholder="Type a name..."
+                className="flex-1 bg-transparent outline-none text-sm"
+                style={{ color: "#0F0F0F" }}
+              />
+              <button
+                onClick={commitCustom}
+                className="text-xs font-semibold px-2 py-1 rounded-md"
+                style={{ background: "#0F0F0F", color: "white" }}
+              >
+                Add
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskDetailSheet({ task, team, onClose, onUpdate }) {
   const due = fmtDue(task.dueDate);
   const status = STATUSES[task.status] || STATUSES.Pending;
   const waLink = task.phone ? `https://wa.me/${task.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(`Hi ${task.assignee}, regarding ${task.id}: ${task.title}`)}` : null;
@@ -418,13 +545,12 @@ function TaskDetailSheet({ task, onClose, onUpdate }) {
           </div>
           <div className="mb-4">
             <p className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Assigned to</p>
-            <div className="flex gap-2 flex-wrap">
-              {TEAM.map((m) => (
-                <button key={m} onClick={() => onUpdate({ assignee: m })} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition active:scale-95" style={{ background: task.assignee === m ? "#0F0F0F" : "white", color: task.assignee === m ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.06)" }}>
-                  <Avatar name={m} size={18} />{m}
-                </button>
-              ))}
-            </div>
+            <AssigneeDropdown
+              value={task.assignee}
+              onChange={(name) => onUpdate({ assignee: name })}
+              options={team}
+              allowCustom={true}
+            />
           </div>
           <div className="mb-2">
             <p className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Status</p>
@@ -457,12 +583,12 @@ function DetailRow({ icon, label, children, border }) {
   );
 }
 
-function NewTaskSheet({ propertyOptions, categoryOptions, tasks, onClose, onCreate }) {
+function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, onCreate }) {
   const [title, setTitle] = useState("");
   const [property, setProperty] = useState(propertyOptions[0] || "");
   const [category, setCategory] = useState(categoryOptions[0] || "");
   const [customCategory, setCustomCategory] = useState("");
-  const [assignee, setAssignee] = useState("Unassigned");
+  const [assignee, setAssignee] = useState(team[0] || "Unassigned");
   const [phone, setPhone] = useState("");
   const [dueDate, setDueDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); });
 
@@ -471,7 +597,15 @@ function NewTaskSheet({ propertyOptions, categoryOptions, tasks, onClose, onCrea
 
   const submit = () => {
     if (!valid) return;
-    onCreate({ title: title.trim(), property, category: customCategory.trim() || category, assignee, phone: phone.trim(), status: "Pending", dueDate });
+    onCreate({
+      title: title.trim(),
+      property,
+      category: customCategory.trim() || category,
+      assignee,
+      phone: phone.trim(),
+      status: "Pending",
+      dueDate,
+    });
   };
 
   return (
@@ -507,13 +641,12 @@ function NewTaskSheet({ propertyOptions, categoryOptions, tasks, onClose, onCrea
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
           </FieldGroup>
           <p className="uppercase mb-2 mt-4" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Assign to</p>
-          <div className="flex gap-2 flex-wrap">
-            {TEAM.map((m) => (
-              <button key={m} onClick={() => setAssignee(m)} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition active:scale-95" style={{ background: assignee === m ? "#0F0F0F" : "white", color: assignee === m ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.06)" }}>
-                <Avatar name={m} size={18} />{m}
-              </button>
-            ))}
-          </div>
+          <AssigneeDropdown
+            value={assignee}
+            onChange={setAssignee}
+            options={team}
+            allowCustom={true}
+          />
         </div>
       </div>
     </div>
