@@ -94,12 +94,18 @@ const nextIdFor = (property, tasks) => {
   return `${prefix}-${String(next).padStart(3, "0")}`;
 };
 
+// Look up an existing phone number for a given assignee from past tasks
+const phoneFor = (assignee, tasks) => {
+  if (!assignee || assignee === "Unassigned") return "";
+  const match = tasks.find((t) => t.assignee === assignee && t.phone);
+  return match ? match.phone : "";
+};
+
 // ---------- Main ----------
 export default function App() {
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
-  const [sheetTeam, setSheetTeam] = usePersistedState("ops.sheetTeam", []);
 
   const csvUrl = ENV_CSV_URL || csvOverride;
   const webhookUrl = ENV_WEBHOOK_URL || webhookOverride;
@@ -136,13 +142,10 @@ export default function App() {
   }, [tasks]);
 
   const teamOptions = useMemo(() => {
-    if (sheetTeam.length > 0) {
-      return ["Unassigned", ...sheetTeam.filter((t) => t && t !== "Unassigned").sort()];
-    }
     const set = new Set(tasks.map((t) => t.assignee).filter(Boolean));
     set.delete("Unassigned");
     return ["Unassigned", ...Array.from(set).sort()];
-  }, [sheetTeam, tasks]);
+  }, [tasks]);
 
   const filtered = useMemo(() => {
     return tasks
@@ -207,19 +210,6 @@ export default function App() {
       const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
       const fetched = parsed.data.map(rowToTask).filter((t) => t.id);
       if (fetched.length > 0) setTasks(fetched);
-      
-      // Extract team members from sheet if available
-      const teamSet = new Set();
-      parsed.data.forEach((row) => {
-        if (row["Team Members"]) {
-          const members = row["Team Members"].split(",").map((m) => m.trim()).filter(Boolean);
-          members.forEach((m) => teamSet.add(m));
-        }
-      });
-      if (teamSet.size > 0) {
-        setSheetTeam(Array.from(teamSet));
-      }
-      
       setLastSync(new Date().toISOString());
     } catch (e) {
       setSyncError(e.message || "Fetch failed");
@@ -329,6 +319,7 @@ export default function App() {
             team={teamOptions}
             onClose={() => setOpenTask(null)}
             onUpdate={(patch) => updateTask(openTask.id, patch)}
+            tasks={tasks}
           />
         )}
         {newTaskOpen && (
@@ -511,10 +502,28 @@ function AssigneeDropdown({ value, onChange, options, allowCustom }) {
   );
 }
 
-function TaskDetailSheet({ task, team, onClose, onUpdate }) {
+function TaskDetailSheet({ task, team, tasks, onClose, onUpdate }) {
   const due = fmtDue(task.dueDate);
   const status = STATUSES[task.status] || STATUSES.Pending;
   const waLink = task.phone ? `https://wa.me/${task.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(`Hi ${task.assignee}, regarding ${task.id}: ${task.title}`)}` : null;
+  const [editingDueDate, setEditingDueDate] = useState(false);
+  const [tempDueDate, setTempDueDate] = useState(task.dueDate);
+
+  // When the assignee changes, also patch the phone if we know one for them
+  const handleAssigneeChange = (name) => {
+    const knownPhone = phoneFor(name, tasks);
+    const patch = { assignee: name };
+    if (knownPhone && !task.phone) patch.phone = knownPhone;
+    if (knownPhone && task.phone && task.assignee !== name) patch.phone = knownPhone;
+    onUpdate(patch);
+  };
+
+  const handleDueDateSave = () => {
+    if (tempDueDate !== task.dueDate) {
+      onUpdate({ dueDate: tempDueDate });
+    }
+    setEditingDueDate(false);
+  };
 
   return (
     <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
@@ -533,7 +542,29 @@ function TaskDetailSheet({ task, team, onClose, onUpdate }) {
           <h2 className="font-display text-2xl leading-tight mb-4" style={{ color: "#0F0F0F", fontWeight: 500 }}>{task.title}</h2>
           <div className="rounded-2xl mb-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
             <DetailRow icon={<MapPin size={14} />} label="Property"><div className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>{task.property || "—"}</div></DetailRow>
-            <DetailRow icon={<Clock size={14} />} label="Due" border><div className="text-sm font-semibold" style={{ color: due.overdue ? "#B91C1C" : "#0F0F0F" }}>{due.text}</div></DetailRow>
+            <DetailRow icon={<Clock size={14} />} label="Due" border interactive onClick={() => setEditingDueDate(true)}>
+              {editingDueDate ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={tempDueDate}
+                    onChange={(e) => setTempDueDate(e.target.value)}
+                    className="flex-1 bg-transparent outline-none text-sm font-semibold"
+                    style={{ color: "#0F0F0F" }}
+                    autoFocus
+                  />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDueDateSave(); }}
+                    className="px-2 py-1 rounded-lg text-xs font-semibold transition active:scale-95"
+                    style={{ background: "#0F0F0F", color: "white" }}
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <div className="text-sm font-semibold cursor-pointer" style={{ color: due.overdue ? "#B91C1C" : "#0F0F0F" }}>{due.text}</div>
+              )}
+            </DetailRow>
             {task.phone && (
               <DetailRow icon={<Phone size={14} />} label="Phone" border>
                 <div className="flex items-center justify-between">
@@ -547,7 +578,7 @@ function TaskDetailSheet({ task, team, onClose, onUpdate }) {
             <p className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Assigned to</p>
             <AssigneeDropdown
               value={task.assignee}
-              onChange={(name) => onUpdate({ assignee: name })}
+              onChange={handleAssigneeChange}
               options={team}
               allowCustom={true}
             />
@@ -571,9 +602,13 @@ function TaskDetailSheet({ task, team, onClose, onUpdate }) {
   );
 }
 
-function DetailRow({ icon, label, children, border }) {
+function DetailRow({ icon, label, children, border, interactive, onClick }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3" style={{ borderTop: border ? "1px solid rgba(0,0,0,0.05)" : "none" }}>
+    <div
+      className={`flex items-center gap-3 px-4 py-3 ${interactive ? "cursor-pointer hover:bg-gray-50" : ""}`}
+      style={{ borderTop: border ? "1px solid rgba(0,0,0,0.05)" : "none" }}
+      onClick={interactive ? onClick : undefined}
+    >
       <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "#FAF6EE", color: "#8A7A5C" }}>{icon}</div>
       <div className="flex-1">
         <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
@@ -589,11 +624,19 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
   const [category, setCategory] = useState(categoryOptions[0] || "");
   const [customCategory, setCustomCategory] = useState("");
   const [assignee, setAssignee] = useState(team[0] || "Unassigned");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(() => phoneFor(team[0] || "", tasks));
+  const [phoneEdited, setPhoneEdited] = useState(false);
   const [dueDate, setDueDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); });
 
   const valid = title.trim() && property;
   const previewId = property ? nextIdFor(property, tasks) : "—";
+
+  const handleAssigneeChange = (name) => {
+    setAssignee(name);
+    if (!phoneEdited) {
+      setPhone(phoneFor(name, tasks));
+    }
+  };
 
   const submit = () => {
     if (!valid) return;
@@ -634,19 +677,27 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
             )}
             <input value={customCategory} onChange={(e) => setCustomCategory(e.target.value)} placeholder="Or type a new category..." className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
           </FieldGroup>
+          <p className="uppercase mb-2 mt-4" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Assign to</p>
+          <AssigneeDropdown
+            value={assignee}
+            onChange={handleAssigneeChange}
+            options={team}
+            allowCustom={true}
+          />
+          <div className="mt-4" />
           <FieldGroup label="Phone (for WhatsApp)">
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 27711918399" inputMode="tel" className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+            <input
+              value={phone}
+              onChange={(e) => { setPhone(e.target.value); setPhoneEdited(true); }}
+              placeholder="Auto-filled from assignee"
+              inputMode="tel"
+              className="w-full bg-transparent outline-none text-sm font-medium"
+              style={{ color: "#0F0F0F" }}
+            />
           </FieldGroup>
           <FieldGroup label="Due date">
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
           </FieldGroup>
-          <p className="uppercase mb-2 mt-4" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Assign to</p>
-          <AssigneeDropdown
-            value={assignee}
-            onChange={setAssignee}
-            options={team}
-            allowCustom={true}
-          />
         </div>
       </div>
     </div>
