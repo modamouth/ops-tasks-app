@@ -22,6 +22,27 @@ const DONE_STATUS = "Done";
 // Avatar color palette — deterministic per name
 const AVATAR_PALETTE = ["#0F4C5C", "#7C2D12", "#374151", "#5B21B6", "#9F1239", "#065F46", "#9A3412", "#1E3A8A"];
 
+// Master property list — rebuild needed when adding new ones.
+// Eventually move this to a 'Lookups' tab in the sheet for no-code edits.
+const MASTER_PROPERTIES = [
+  "269 Independence",
+  "44 On Post",
+  "Arandis",
+  "Forum Building",
+  "Katutura",
+  "Keetmans",
+  "Kenya House",
+  "Maerua Lifestyle",
+  "Mediva House",
+  "Mutual Tower",
+  "Ondangwa",
+  "Oshakati",
+  "Oshikango",
+  "Otjivanda",
+  "Rehoboth",
+  "Schuster House",
+];
+
 const SEED_TASKS = [
   {
     id: "DEMO-001",
@@ -132,8 +153,10 @@ export default function App() {
   }, []);
 
   const propertyOptions = useMemo(() => {
-    const set = new Set(tasks.map((t) => t.property).filter(Boolean));
-    return ["All properties", ...Array.from(set).sort()];
+    // Union: master list + any property already in tasks (covers older naming)
+    const fromTasks = new Set(tasks.map((t) => t.property).filter(Boolean));
+    const combined = new Set([...MASTER_PROPERTIES, ...fromTasks]);
+    return ["All properties", ...Array.from(combined).sort()];
   }, [tasks]);
 
   const categoryOptions = useMemo(() => {
@@ -184,7 +207,12 @@ export default function App() {
   const updateTask = (id, patch) => {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     setOpenTask((cur) => (cur && cur.id === id ? { ...cur, ...patch } : cur));
-    pushChange({ action: "update", id, patch });
+
+    if (patch.status === "Done") {
+      pushChange({ action: "complete", id, patch });
+    } else {
+      pushChange({ action: "update", id, patch });
+    }
   };
 
   const addTask = (data) => {
@@ -509,7 +537,6 @@ function TaskDetailSheet({ task, team, tasks, onClose, onUpdate }) {
   const [editingDueDate, setEditingDueDate] = useState(false);
   const [tempDueDate, setTempDueDate] = useState(task.dueDate);
 
-  // When the assignee changes, also patch the phone if we know one for them
   const handleAssigneeChange = (name) => {
     const knownPhone = phoneFor(name, tasks);
     const patch = { assignee: name };
