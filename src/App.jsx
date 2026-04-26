@@ -270,7 +270,7 @@ export default function App() {
       >
         <div className="flex items-center justify-between px-6 pt-3 pb-1 text-xs font-semibold" style={{ color: "#0F0F0F" }}>
           <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
-          <div className="flex items-center gap-1"><Signal size={12} /><Wifi size={12} /><Battery size={14} /></div>
+          <span style={{ color: "#8A7A5C" }}>{now.toLocaleDateString("en-GB", { month: "short", day: "numeric" })}</span>
         </div>
 
         <div className="px-6 pt-3 pb-4" style={{ background: "#FAF6EE" }}>
