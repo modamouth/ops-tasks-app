@@ -249,7 +249,7 @@ export default function App() {
   return (
     <div
       className="min-h-screen w-full flex items-center justify-center p-0 sm:p-6"
-      style={{ background: "radial-gradient(ellipse at top, #E8DFD0 0%, #D4C7B0 50%, #B8A88A 100%)" }}
+      style={{ background: "#003f2d" }}
     >
       <style>{`
         .font-display { font-family: 'Fraunces', Georgia, serif; font-optical-sizing: auto; }
