@@ -391,6 +391,7 @@ function TaskCard({ task, onClick, onToggle }) {
           <div className="flex items-center gap-2 mb-1.5">
             <span className="px-1.5 py-0.5 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
             {task.category && <span className="text-xs" style={{ color: "#8A7A5C" }}>{task.category}</span>}
+            {task.image && <span className="text-xs" style={{ color: "#8A7A5C" }}>📷</span>}
           </div>
           <h3 className="font-display text-base leading-snug" style={{ color: "#0F0F0F", fontWeight: 500, textDecoration: done ? "line-through" : "none" }}>{task.title}</h3>
           <div className="flex items-center gap-3 mt-2 text-xs" style={{ color: "#8A7A5C" }}>
@@ -406,6 +407,9 @@ function TaskCard({ task, onClick, onToggle }) {
             </span>
           </div>
         </div>
+        {task.image && (
+          <img src={task.image} alt="Task" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+        )}
       </div>
     </div>
   );
@@ -567,6 +571,11 @@ function TaskDetailSheet({ task, team, tasks, onClose, onUpdate }) {
             {task.category && <span className="px-2 py-1 rounded-md font-semibold uppercase flex items-center gap-1" style={{ fontSize: "10px", background: "white", color: "#374151", border: "1px solid rgba(0,0,0,0.08)", letterSpacing: "0.05em" }}><Tag size={10} />{task.category}</span>}
           </div>
           <h2 className="font-display text-2xl leading-tight mb-4" style={{ color: "#0F0F0F", fontWeight: 500 }}>{task.title}</h2>
+          {task.image && (
+            <div className="rounded-2xl mb-4 overflow-hidden">
+              <img src={task.image} alt="Task attachment" className="w-full max-h-80 object-cover" />
+            </div>
+          )}
           <div className="rounded-2xl mb-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
             <DetailRow icon={<MapPin size={14} />} label="Property"><div className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>{task.property || "—"}</div></DetailRow>
             <DetailRow icon={<Clock size={14} />} label="Due" border interactive onClick={() => setEditingDueDate(true)}>
@@ -654,6 +663,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
   const [phone, setPhone] = useState(() => phoneFor(team[0] || "", tasks));
   const [phoneEdited, setPhoneEdited] = useState(false);
   const [dueDate, setDueDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); });
+  const [image, setImage] = useState(null);
 
   const valid = title.trim() && property;
   const previewId = property ? nextIdFor(property, tasks) : "—";
@@ -663,6 +673,21 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
     if (!phoneEdited) {
       setPhone(phoneFor(name, tasks));
     }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImage(event.target?.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const removeImage = () => {
+    setImage(null);
   };
 
   const submit = () => {
@@ -675,6 +700,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
       phone: phone.trim(),
       status: "Pending",
       dueDate,
+      image: image || undefined,
     });
   };
 
@@ -724,6 +750,34 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
           </FieldGroup>
           <FieldGroup label="Due date">
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+          </FieldGroup>
+          <FieldGroup label="Attachment">
+            {image ? (
+              <div className="space-y-2">
+                <img src={image} alt="Preview" className="w-full rounded-lg max-h-48 object-cover" />
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="w-full px-3 py-2 rounded-lg text-sm font-semibold transition active:scale-95"
+                  style={{ background: "#FEE2E2", color: "#991B1B" }}
+                >
+                  Remove image
+                </button>
+              </div>
+            ) : (
+              <label className="w-full">
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
+                <div className="w-full px-3 py-2 rounded-lg text-sm font-semibold text-center cursor-pointer transition active:scale-95" style={{ background: "#DBEAFE", color: "#1D4ED8" }}>
+                  📷 Take photo or upload image
+                </div>
+              </label>
+            )}
           </FieldGroup>
         </div>
       </div>
