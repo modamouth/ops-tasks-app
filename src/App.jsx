@@ -3,7 +3,7 @@ import Papa from "papaparse";
 import {
   Search, Plus, MapPin, Clock, X, Check, AlertCircle, Settings,
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
-  Wifi, Signal, Battery, Loader2, ChevronDown, Phone, MessageCircle, Tag,
+  Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera,
 } from "lucide-react";
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
@@ -19,11 +19,14 @@ const STATUSES = {
 const STATUS_KEYS = Object.keys(STATUSES);
 const DONE_STATUS = "Done";
 
+// Photo upload constraints — kept small for fast uploads on mobile data
+const MAX_PHOTO_WIDTH = 1024;
+const PHOTO_QUALITY = 0.82;
+
 // Avatar color palette — deterministic per name
 const AVATAR_PALETTE = ["#0F4C5C", "#7C2D12", "#374151", "#5B21B6", "#9F1239", "#065F46", "#9A3412", "#1E3A8A"];
 
 // Master property list — rebuild needed when adding new ones.
-// Eventually move this to a 'Lookups' tab in the sheet for no-code edits.
 const MASTER_PROPERTIES = [
   "269 Independence",
   "44 On Post",
@@ -70,6 +73,19 @@ const fmtDue = (val) => {
   return { text: day };
 };
 
+const fmtCreatedAt = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return d.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).replace(",", " at");
+};
+
 const timeAgo = (iso) => {
   const mins = Math.floor((new Date() - new Date(iso)) / 60000);
   if (mins < 1) return "just now";
@@ -77,6 +93,40 @@ const timeAgo = (iso) => {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+};
+
+// Resize an image file to a max width while keeping aspect ratio.
+// Returns a JPEG data URL — typically 80–250 KB for a 1024px-wide photo.
+const resizeImage = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, MAX_PHOTO_WIDTH / img.width);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", PHOTO_QUALITY));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+// Convert a Google Drive shareable URL into a directly-displayable image src
+const driveImageSrc = (url) => {
+  if (!url) return "";
+  const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch) return `https://drive.google.com/uc?export=view&id=${idMatch[1]}`;
+  return url;
 };
 
 function usePersistedState(key, defaultValue) {
@@ -103,6 +153,7 @@ const rowToTask = (row) => ({
   phone: row["Phone Number"] || "",
   status: STATUS_KEYS.includes(row["Status"]) ? row["Status"] : "Pending",
   dueDate: row["Due Date"] || "",
+  photoUrl: row["Photo URL"] || "",
 });
 
 const nextIdFor = (property, tasks) => {
@@ -115,7 +166,6 @@ const nextIdFor = (property, tasks) => {
   return `${prefix}-${String(next).padStart(3, "0")}`;
 };
 
-// Look up an existing phone number for a given assignee from past tasks
 const phoneFor = (assignee, tasks) => {
   if (!assignee || assignee === "Unassigned") return "";
   const match = tasks.find((t) => t.assignee === assignee && t.phone);
@@ -125,6 +175,8 @@ const phoneFor = (assignee, tasks) => {
 // ---------- Main ----------
 export default function App() {
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
+  // Per-task created timestamps stored locally (not in sheet)
+  const [createdAtMap, setCreatedAtMap] = usePersistedState("ops.createdAt", {});
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
 
@@ -153,7 +205,6 @@ export default function App() {
   }, []);
 
   const propertyOptions = useMemo(() => {
-    // Union: master list + any property already in tasks (covers older naming)
     const fromTasks = new Set(tasks.map((t) => t.property).filter(Boolean));
     const combined = new Set([...MASTER_PROPERTIES, ...fromTasks]);
     return ["All properties", ...Array.from(combined).sort()];
@@ -218,7 +269,9 @@ export default function App() {
   const addTask = (data) => {
     const id = data.id || nextIdFor(data.property, tasks);
     const t = { id, ...data };
+    const createdIso = new Date().toISOString();
     setTasks((prev) => [t, ...prev]);
+    setCreatedAtMap((prev) => ({ ...prev, [id]: createdIso }));
     pushChange({ action: "create", task: t });
   };
 
@@ -249,7 +302,7 @@ export default function App() {
   return (
     <div
       className="min-h-screen w-full flex items-center justify-center p-0 sm:p-6"
-      style={{ background: "#003f2d" }}
+      style={{ background: "radial-gradient(ellipse at top, #E8DFD0 0%, #D4C7B0 50%, #B8A88A 100%)" }}
     >
       <style>{`
         .font-display { font-family: 'Fraunces', Georgia, serif; font-optical-sizing: auto; }
@@ -268,16 +321,14 @@ export default function App() {
           boxShadow: "0 30px 80px -20px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06)",
         }}
       >
-        <div className="flex items-center justify-between px-6 pt-3 pb-1 text-xs font-semibold" style={{ color: "#0F0F0F" }}>
-          <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
-          <span style={{ color: "#8A7A5C" }}>{now.toLocaleDateString("en-GB", { month: "short", day: "numeric" })}</span>
-        </div>
-
-        <div className="px-6 pt-3 pb-4" style={{ background: "#FAF6EE" }}>
+        <div className="px-6 pt-6 pb-4" style={{ background: "#FAF6EE" }}>
           <div className="flex items-start justify-between mb-3">
             <div>
               <p className="text-xs uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.15em" }}>Operations</p>
               <h1 className="font-display text-3xl leading-none mt-1" style={{ color: "#0F0F0F", fontWeight: 500 }}>Today</h1>
+              <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>
+                {now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={refresh} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
@@ -313,7 +364,7 @@ export default function App() {
           </div>
         )}
 
-        <div className="overflow-y-auto scrollbar-hide" style={{ height: `calc(100% - ${syncError ? 312 : 280}px)`, background: "#FAF6EE" }}>
+        <div className="overflow-y-auto scrollbar-hide" style={{ height: `calc(100% - ${syncError ? 314 : 282}px)`, background: "#FAF6EE" }}>
           <div className="px-4 py-3 flex items-center justify-between">
             <p className="text-xs" style={{ color: "#8A7A5C" }}>
               {filtered.length} {filtered.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
@@ -344,6 +395,7 @@ export default function App() {
         {openTask && (
           <TaskDetailSheet
             task={openTask}
+            createdAt={createdAtMap[openTask.id]}
             team={teamOptions}
             onClose={() => setOpenTask(null)}
             onUpdate={(patch) => updateTask(openTask.id, patch)}
@@ -380,6 +432,7 @@ function TaskCard({ task, onClick, onToggle }) {
   const due = fmtDue(task.dueDate);
   const status = STATUSES[task.status] || STATUSES.Pending;
   const done = task.status === DONE_STATUS;
+  const photoSrc = driveImageSrc(task.photoUrl) || task.image;
 
   return (
     <div onClick={onClick} className="rounded-2xl p-4 cursor-pointer transition-all active:scale-[0.99]" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)", opacity: done ? 0.6 : 1 }}>
@@ -391,7 +444,7 @@ function TaskCard({ task, onClick, onToggle }) {
           <div className="flex items-center gap-2 mb-1.5">
             <span className="px-1.5 py-0.5 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
             {task.category && <span className="text-xs" style={{ color: "#8A7A5C" }}>{task.category}</span>}
-            {task.image && <span className="text-xs" style={{ color: "#8A7A5C" }}>📷</span>}
+            {photoSrc && <Camera size={11} style={{ color: "#8A7A5C" }} />}
           </div>
           <h3 className="font-display text-base leading-snug" style={{ color: "#0F0F0F", fontWeight: 500, textDecoration: done ? "line-through" : "none" }}>{task.title}</h3>
           <div className="flex items-center gap-3 mt-2 text-xs" style={{ color: "#8A7A5C" }}>
@@ -407,8 +460,13 @@ function TaskCard({ task, onClick, onToggle }) {
             </span>
           </div>
         </div>
-        {task.image && (
-          <img src={task.image} alt="Task" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+        {photoSrc && (
+          <img
+            src={photoSrc}
+            alt="Task"
+            className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
         )}
       </div>
     </div>
@@ -534,12 +592,14 @@ function AssigneeDropdown({ value, onChange, options, allowCustom }) {
   );
 }
 
-function TaskDetailSheet({ task, team, tasks, onClose, onUpdate }) {
+function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate }) {
   const due = fmtDue(task.dueDate);
   const status = STATUSES[task.status] || STATUSES.Pending;
   const waLink = task.phone ? `https://wa.me/${task.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(`Hi ${task.assignee}, regarding ${task.id}: ${task.title}`)}` : null;
   const [editingDueDate, setEditingDueDate] = useState(false);
   const [tempDueDate, setTempDueDate] = useState(task.dueDate);
+  const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const handleAssigneeChange = (name) => {
     const knownPhone = phoneFor(name, tasks);
@@ -556,6 +616,23 @@ function TaskDetailSheet({ task, team, tasks, onClose, onUpdate }) {
     setEditingDueDate(false);
   };
 
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const dataUrl = await resizeImage(file);
+      onUpdate({ image: dataUrl });
+    } catch (err) {
+      alert("Photo processing failed: " + err.message);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const photoSrc = driveImageSrc(task.photoUrl) || task.image;
+  const createdLine = fmtCreatedAt(createdAt);
+
   return (
     <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
       <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl flex flex-col sheet-anim" style={{ background: "#FAF6EE", maxHeight: "92%", height: "92%" }} onClick={(e) => e.stopPropagation()}>
@@ -570,12 +647,38 @@ function TaskDetailSheet({ task, team, tasks, onClose, onUpdate }) {
             <span className="px-2 py-1 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
             {task.category && <span className="px-2 py-1 rounded-md font-semibold uppercase flex items-center gap-1" style={{ fontSize: "10px", background: "white", color: "#374151", border: "1px solid rgba(0,0,0,0.08)", letterSpacing: "0.05em" }}><Tag size={10} />{task.category}</span>}
           </div>
-          <h2 className="font-display text-2xl leading-tight mb-4" style={{ color: "#0F0F0F", fontWeight: 500 }}>{task.title}</h2>
-          {task.image && (
-            <div className="rounded-2xl mb-4 overflow-hidden">
-              <img src={task.image} alt="Task attachment" className="w-full max-h-80 object-cover" />
-            </div>
+          <h2 className="font-display text-2xl leading-tight mb-2" style={{ color: "#0F0F0F", fontWeight: 500 }}>{task.title}</h2>
+          {createdLine && (
+            <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>Created {createdLine}</p>
           )}
+
+          {/* Photo section */}
+          <div className="mb-4">
+            <p className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Photo</p>
+            {photoSrc ? (
+              <div className="relative rounded-2xl overflow-hidden">
+                <img
+                  src={photoSrc}
+                  alt="Task"
+                  className="w-full max-h-64 object-cover cursor-pointer"
+                  onClick={() => setPhotoViewerOpen(true)}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+                <label className="absolute bottom-2 right-2 px-2 py-1 rounded-md text-xs font-semibold cursor-pointer flex items-center gap-1" style={{ background: "rgba(0,0,0,0.6)", color: "white" }}>
+                  {uploadingPhoto ? <Loader2 size={11} className="animate-spin" /> : null}
+                  {uploadingPhoto ? "Uploading..." : "Replace"}
+                  <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} className="hidden" disabled={uploadingPhoto} />
+                </label>
+              </div>
+            ) : (
+              <label className="flex items-center justify-center gap-2 w-full py-6 rounded-xl text-sm font-medium cursor-pointer" style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
+                {uploadingPhoto ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                {uploadingPhoto ? "Uploading..." : "Add photo"}
+                <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} className="hidden" disabled={uploadingPhoto} />
+              </label>
+            )}
+          </div>
+
           <div className="rounded-2xl mb-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
             <DetailRow icon={<MapPin size={14} />} label="Property"><div className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>{task.property || "—"}</div></DetailRow>
             <DetailRow icon={<Clock size={14} />} label="Due" border interactive onClick={() => setEditingDueDate(true)}>
@@ -633,6 +736,24 @@ function TaskDetailSheet({ task, team, tasks, onClose, onUpdate }) {
             </div>
           </div>
         </div>
+
+        {/* Full-screen photo viewer */}
+        {photoViewerOpen && photoSrc && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.92)" }}
+            onClick={() => setPhotoViewerOpen(false)}
+          >
+            <button
+              onClick={() => setPhotoViewerOpen(false)}
+              className="absolute top-4 right-4 w-10 h-10 rounded-full flex items-center justify-center"
+              style={{ background: "rgba(255,255,255,0.15)", color: "white" }}
+            >
+              <X size={18} />
+            </button>
+            <img src={photoSrc} alt="Task" className="max-w-[95vw] max-h-[90vh] object-contain" />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -664,6 +785,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
   const [phoneEdited, setPhoneEdited] = useState(false);
   const [dueDate, setDueDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); });
   const [image, setImage] = useState(null);
+  const [imageProcessing, setImageProcessing] = useState(false);
 
   const valid = title.trim() && property;
   const previewId = property ? nextIdFor(property, tasks) : "—";
@@ -675,20 +797,21 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
     }
   };
 
-  const handleImageChange = (e) => {
+  const handleImageChange = async (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setImage(event.target?.result);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    setImageProcessing(true);
+    try {
+      const dataUrl = await resizeImage(file);
+      setImage(dataUrl);
+    } catch (err) {
+      alert("Photo processing failed: " + err.message);
+    } finally {
+      setImageProcessing(false);
     }
   };
 
-  const removeImage = () => {
-    setImage(null);
-  };
+  const removeImage = () => { setImage(null); };
 
   const submit = () => {
     if (!valid) return;
@@ -711,7 +834,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
         <div className="px-5 pt-2 pb-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
           <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>New task</span>
-          <button onClick={submit} disabled={!valid} className="text-sm font-semibold" style={{ color: valid ? "#0F0F0F" : "#D4C7B0" }}>Create</button>
+          <button onClick={submit} disabled={!valid || imageProcessing} className="text-sm font-semibold" style={{ color: (valid && !imageProcessing) ? "#0F0F0F" : "#D4C7B0" }}>Create</button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 scrollbar-hide pb-6">
           <p className="text-xs mb-2" style={{ color: "#8A7A5C" }}>ID will be: <span className="font-mono font-semibold" style={{ color: "#0F0F0F" }}>{previewId}</span></p>
@@ -751,7 +874,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
           <FieldGroup label="Due date">
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
           </FieldGroup>
-          <FieldGroup label="Attachment">
+          <FieldGroup label="Photo">
             {image ? (
               <div className="space-y-2">
                 <img src={image} alt="Preview" className="w-full rounded-lg max-h-48 object-cover" />
@@ -772,9 +895,11 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
                   capture="environment"
                   onChange={handleImageChange}
                   className="hidden"
+                  disabled={imageProcessing}
                 />
-                <div className="w-full px-3 py-2 rounded-lg text-sm font-semibold text-center cursor-pointer transition active:scale-95" style={{ background: "#DBEAFE", color: "#1D4ED8" }}>
-                  📷 Take photo or upload image
+                <div className="w-full px-3 py-2 rounded-lg text-sm font-semibold text-center cursor-pointer transition active:scale-95 flex items-center justify-center gap-2" style={{ background: "#DBEAFE", color: "#1D4ED8" }}>
+                  {imageProcessing ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+                  {imageProcessing ? "Processing..." : "Take photo or upload image"}
                 </div>
               </label>
             )}
