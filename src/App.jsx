@@ -125,7 +125,7 @@ const resizeImage = (file) => {
 const driveImageSrc = (url) => {
   if (!url) return "";
   const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (idMatch) return `https://drive.google.com/uc?export=view&id=${idMatch[1]}`;
+  if (idMatch) return `https://drive.usercontent.google.com/download?id=${idMatch[1]}&export=view`;
   return url;
 };
 
