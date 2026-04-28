@@ -3,7 +3,7 @@ import Papa from "papaparse";
 import {
   Search, Plus, MapPin, Clock, X, Check, AlertCircle, Settings,
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
-  Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera,
+  Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
 } from "lucide-react";
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
@@ -11,6 +11,7 @@ const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "";
 const ENV_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
 
 // ---------- CONFIG ----------
+// Active statuses — visible in detail sheet status pills
 const STATUSES = {
   Pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7" },
   "In Progress": { label: "In progress", color: "#1D4ED8", bg: "#DBEAFE" },
@@ -18,6 +19,10 @@ const STATUSES = {
 };
 const STATUS_KEYS = Object.keys(STATUSES);
 const DONE_STATUS = "Done";
+const ARCHIVED_STATUS = "Archived";
+
+// Style for archived (kept separate so it's not in active status pills)
+const ARCHIVED_STYLE = { label: "Archived", color: "#6B7280", bg: "#F3F4F6" };
 
 // Photo upload constraints — kept small for fast uploads on mobile data
 const MAX_PHOTO_WIDTH = 1024;
@@ -96,7 +101,6 @@ const timeAgo = (iso) => {
 };
 
 // Resize an image file to a max width while keeping aspect ratio.
-// Returns a JPEG data URL — typically 80–250 KB for a 1024px-wide photo.
 const resizeImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -121,7 +125,8 @@ const resizeImage = (file) => {
   });
 };
 
-// Convert a Google Drive shareable URL into a directly-displayable image src
+// Convert a Google Drive shareable URL into a directly-displayable image src.
+// Uses the thumbnail API which is reliable for <img> embedding (works around ORB/CORS).
 const driveImageSrc = (url) => {
   if (!url) return "";
   const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
@@ -151,7 +156,10 @@ const rowToTask = (row) => ({
   category: row["Category"] || "",
   assignee: row["Assigned To"] || "Unassigned",
   phone: row["Phone Number"] || "",
-  status: STATUS_KEYS.includes(row["Status"]) ? row["Status"] : "Pending",
+  // Allow Archived through too — used for filtering, not for default "All" view
+  status: STATUS_KEYS.includes(row["Status"]) || row["Status"] === ARCHIVED_STATUS
+    ? row["Status"]
+    : "Pending",
   dueDate: row["Due Date"] || "",
   photoUrl: row["Photo URL"] || "",
 });
@@ -175,7 +183,6 @@ const phoneFor = (assignee, tasks) => {
 // ---------- Main ----------
 export default function App() {
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
-  // Per-task created timestamps stored locally (not in sheet)
   const [createdAtMap, setCreatedAtMap] = usePersistedState("ops.createdAt", {});
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
@@ -223,7 +230,13 @@ export default function App() {
 
   const filtered = useMemo(() => {
     return tasks
-      .filter((t) => activeStatus === "all" || t.status === activeStatus)
+      .filter((t) => {
+        if (activeStatus === "all") {
+          // Default view: hide archived
+          return t.status !== ARCHIVED_STATUS;
+        }
+        return t.status === activeStatus;
+      })
       .filter((t) => activeProperty === "All properties" || t.property === activeProperty)
       .filter((t) =>
         search.trim() === ""
@@ -231,8 +244,8 @@ export default function App() {
           : (t.title + t.property + t.category + t.assignee).toLowerCase().includes(search.toLowerCase())
       )
       .sort((a, b) => {
-        const aDone = a.status === DONE_STATUS;
-        const bDone = b.status === DONE_STATUS;
+        const aDone = a.status === DONE_STATUS || a.status === ARCHIVED_STATUS;
+        const bDone = b.status === DONE_STATUS || b.status === ARCHIVED_STATUS;
         if (aDone && !bDone) return 1;
         if (bDone && !aDone) return -1;
         return new Date(a.dueDate || "9999-12-31") - new Date(b.dueDate || "9999-12-31");
@@ -241,8 +254,9 @@ export default function App() {
 
   const counts = useMemo(() => {
     const props = activeProperty === "All properties" ? tasks : tasks.filter((t) => t.property === activeProperty);
-    const c = { all: props.length };
+    const c = { all: props.filter((t) => t.status !== ARCHIVED_STATUS).length };
     STATUS_KEYS.forEach((k) => { c[k] = props.filter((t) => t.status === k).length; });
+    c[ARCHIVED_STATUS] = props.filter((t) => t.status === ARCHIVED_STATUS).length;
     return c;
   }, [tasks, activeProperty]);
 
@@ -259,11 +273,18 @@ export default function App() {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     setOpenTask((cur) => (cur && cur.id === id ? { ...cur, ...patch } : cur));
 
-    if (patch.status === "Done") {
+    if (patch.status === DONE_STATUS) {
       pushChange({ action: "complete", id, patch });
     } else {
       pushChange({ action: "update", id, patch });
     }
+  };
+
+  const archiveTask = (id) => {
+    // Archive sets status; uses update action so it doesn't trigger completion notifications
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: ARCHIVED_STATUS } : t)));
+    setOpenTask(null);
+    pushChange({ action: "update", id, patch: { status: ARCHIVED_STATUS } });
   };
 
   const addTask = (data) => {
@@ -298,6 +319,13 @@ export default function App() {
       setSyncing(false);
     }
   };
+
+  // Filter chips for status — "All" first, active statuses, then "Archived" at the end
+  const statusChips = [
+    { key: "all", label: "All" },
+    ...STATUS_KEYS.map((k) => ({ key: k, label: STATUSES[k].label })),
+    { key: ARCHIVED_STATUS, label: ARCHIVED_STYLE.label },
+  ];
 
   return (
     <div
@@ -350,7 +378,7 @@ export default function App() {
         </div>
 
         <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-          {[{ key: "all", label: "All" }, ...STATUS_KEYS.map((k) => ({ key: k, label: STATUSES[k].label }))].map((p) => (
+          {statusChips.map((p) => (
             <button key={p.key} onClick={() => setActiveStatus(p.key)} className="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all active:scale-95" style={{ background: activeStatus === p.key ? "#0F0F0F" : "white", color: activeStatus === p.key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
               {p.label}
               <span className="px-1.5 rounded-full" style={{ fontSize: "10px", background: activeStatus === p.key ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.05)" }}>{counts[p.key] ?? 0}</span>
@@ -399,6 +427,7 @@ export default function App() {
             team={teamOptions}
             onClose={() => setOpenTask(null)}
             onUpdate={(patch) => updateTask(openTask.id, patch)}
+            onArchive={() => archiveTask(openTask.id)}
             tasks={tasks}
           />
         )}
@@ -430,12 +459,13 @@ export default function App() {
 // ---------- Task card ----------
 function TaskCard({ task, onClick, onToggle }) {
   const due = fmtDue(task.dueDate);
-  const status = STATUSES[task.status] || STATUSES.Pending;
+  const isArchived = task.status === ARCHIVED_STATUS;
+  const status = isArchived ? ARCHIVED_STYLE : (STATUSES[task.status] || STATUSES.Pending);
   const done = task.status === DONE_STATUS;
   const photoSrc = driveImageSrc(task.photoUrl) || task.image;
 
   return (
-    <div onClick={onClick} className="rounded-2xl p-4 cursor-pointer transition-all active:scale-[0.99]" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)", opacity: done ? 0.6 : 1 }}>
+    <div onClick={onClick} className="rounded-2xl p-4 cursor-pointer transition-all active:scale-[0.99]" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)", opacity: (done || isArchived) ? 0.6 : 1 }}>
       <div className="flex items-start gap-3">
         <button onClick={(e) => { e.stopPropagation(); onToggle(); }} className="mt-0.5 transition-transform active:scale-90">
           {done ? <CheckCircle2 size={20} style={{ color: "#15803D" }} /> : <Circle size={20} style={{ color: "#D4C7B0" }} />}
@@ -446,7 +476,7 @@ function TaskCard({ task, onClick, onToggle }) {
             {task.category && <span className="text-xs" style={{ color: "#8A7A5C" }}>{task.category}</span>}
             {photoSrc && <Camera size={11} style={{ color: "#8A7A5C" }} />}
           </div>
-          <h3 className="font-display text-base leading-snug" style={{ color: "#0F0F0F", fontWeight: 500, textDecoration: done ? "line-through" : "none" }}>{task.title}</h3>
+          <h3 className="font-display text-base leading-snug" style={{ color: "#0F0F0F", fontWeight: 500, textDecoration: (done || isArchived) ? "line-through" : "none" }}>{task.title}</h3>
           <div className="flex items-center gap-3 mt-2 text-xs" style={{ color: "#8A7A5C" }}>
             <span className="flex items-center gap-1 truncate"><MapPin size={11} /><span className="truncate">{task.property}</span></span>
           </div>
@@ -592,14 +622,16 @@ function AssigneeDropdown({ value, onChange, options, allowCustom }) {
   );
 }
 
-function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate }) {
+function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onArchive }) {
   const due = fmtDue(task.dueDate);
-  const status = STATUSES[task.status] || STATUSES.Pending;
+  const isArchived = task.status === ARCHIVED_STATUS;
+  const status = isArchived ? ARCHIVED_STYLE : (STATUSES[task.status] || STATUSES.Pending);
   const waLink = task.phone ? `https://wa.me/${task.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(`Hi ${task.assignee}, regarding ${task.id}: ${task.title}`)}` : null;
   const [editingDueDate, setEditingDueDate] = useState(false);
   const [tempDueDate, setTempDueDate] = useState(task.dueDate);
   const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
 
   const handleAssigneeChange = (name) => {
     const knownPhone = phoneFor(name, tasks);
@@ -722,7 +754,7 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate }) {
               allowCustom={true}
             />
           </div>
-          <div className="mb-2">
+          <div className="mb-6">
             <p className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Status</p>
             <div className="flex gap-2">
               {STATUS_KEYS.map((key) => {
@@ -735,6 +767,49 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate }) {
               })}
             </div>
           </div>
+
+          {/* Delete / Archive button */}
+          {!isArchived && (
+            <div className="mb-2">
+              {confirmingArchive ? (
+                <div className="rounded-xl p-3 space-y-2" style={{ background: "#FEE2E2", border: "1px solid rgba(185, 28, 28, 0.15)" }}>
+                  <p className="text-xs font-medium" style={{ color: "#991B1B" }}>
+                    Archive this task? It will be hidden from the main view but preserved in the sheet.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmingArchive(false)}
+                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition active:scale-95"
+                      style={{ background: "white", color: "#374151", border: "1px solid rgba(0,0,0,0.08)" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={onArchive}
+                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition active:scale-95"
+                      style={{ background: "#B91C1C", color: "white" }}
+                    >
+                      Yes, archive
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingArchive(true)}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition active:scale-95"
+                  style={{ background: "white", color: "#B91C1C", border: "1px solid rgba(185, 28, 28, 0.15)" }}
+                >
+                  <Trash2 size={14} />
+                  Delete task
+                </button>
+              )}
+            </div>
+          )}
+          {isArchived && (
+            <div className="rounded-xl p-3 text-xs" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)", color: "#6B7280" }}>
+              This task has been archived. To restore it, change its status in the Google Sheet directly.
+            </div>
+          )}
         </div>
 
         {/* Full-screen photo viewer */}
