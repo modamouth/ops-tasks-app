@@ -4,7 +4,7 @@ import {
   Search, Plus, MapPin, Clock, X, Check, AlertCircle, Settings,
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
-  Wifi, WifiOff,
+  Wifi, WifiOff, ChevronRight,
 } from "lucide-react";
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
@@ -27,8 +27,8 @@ const MAX_PHOTO_WIDTH = 1024;
 const PHOTO_QUALITY = 0.82;
 
 // Offline / sync config
-const FLUSH_INTERVAL_MS = 30000; // try to flush queue every 30 seconds when online
-const STORAGE_WARN_BYTES = 4 * 1024 * 1024; // warn if pending queue exceeds 4 MB
+const FLUSH_INTERVAL_MS = 30000;
+const STORAGE_WARN_BYTES = 4 * 1024 * 1024;
 
 // Avatar palette
 const AVATAR_PALETTE = ["#0F4C5C", "#7C2D12", "#374151", "#5B21B6", "#9F1239", "#065F46", "#9A3412", "#1E3A8A"];
@@ -87,7 +87,16 @@ const timeAgo = (iso) => {
   return `${Math.floor(hrs / 24)}d ago`;
 };
 
-// Resize image to max width before upload
+// "April 2026" style label for a month bucket key (YYYY-MM)
+const fmtMonthLabel = (key) => {
+  if (key === "older") return "Older";
+  if (key === "unknown") return "Date unknown";
+  const [y, m] = key.split("-").map(Number);
+  const d = new Date(y, m - 1, 1);
+  return d.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+};
+
+// Resize image
 const resizeImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -112,7 +121,7 @@ const resizeImage = (file) => {
   });
 };
 
-// Convert Drive URL to a directly-displayable image src
+// Drive URL conversion
 const driveImageSrc = (url) => {
   if (!url) return "";
   const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
@@ -120,7 +129,6 @@ const driveImageSrc = (url) => {
   return url;
 };
 
-// Quick UUID for queue entries
 const uuid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 function usePersistedState(key, defaultValue) {
@@ -168,7 +176,6 @@ const phoneFor = (assignee, tasks) => {
   return match ? match.phone : "";
 };
 
-// Estimate localStorage usage of pending queue (rough byte size)
 const queueBytes = (queue) => {
   try {
     return new Blob([JSON.stringify(queue)]).size;
@@ -177,10 +184,51 @@ const queueBytes = (queue) => {
   }
 };
 
+// Group archived tasks into month buckets keyed by 'YYYY-MM' or 'unknown'.
+// Returns: [{ key: '2026-04', label: 'April 2026', tasks: [...] }, ...] sorted newest-first.
+const bucketByArchivedMonth = (tasks, archivedAtMap) => {
+  const buckets = new Map();
+  for (const t of tasks) {
+    const ts = archivedAtMap[t.id];
+    let key;
+    if (!ts) {
+      key = "unknown";
+    } else {
+      const d = new Date(ts);
+      if (isNaN(d)) {
+        key = "unknown";
+      } else {
+        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      }
+    }
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(t);
+  }
+
+  // Sort: known months descending by year-month, then 'unknown' last
+  const entries = Array.from(buckets.entries());
+  entries.sort(([a], [b]) => {
+    if (a === "unknown") return 1;
+    if (b === "unknown") return -1;
+    return b.localeCompare(a);
+  });
+
+  return entries.map(([key, taskList]) => {
+    // Sort each bucket's tasks by archive timestamp descending (most recent first)
+    const sortedTasks = [...taskList].sort((x, y) => {
+      const tx = archivedAtMap[x.id] ? new Date(archivedAtMap[x.id]).getTime() : 0;
+      const ty = archivedAtMap[y.id] ? new Date(archivedAtMap[y.id]).getTime() : 0;
+      return ty - tx;
+    });
+    return { key, label: fmtMonthLabel(key), tasks: sortedTasks };
+  });
+};
+
 // ---------- Main ----------
 export default function App() {
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
   const [createdAtMap, setCreatedAtMap] = usePersistedState("ops.createdAt", {});
+  const [archivedAtMap, setArchivedAtMap] = usePersistedState("ops.archivedAt", {});
   const [pendingQueue, setPendingQueue] = usePersistedState("ops.pendingChanges", []);
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
@@ -190,7 +238,7 @@ export default function App() {
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [flushing, setFlushing] = useState(false);
-  const flushingRef = useRef(false); // prevent overlapping flushes
+  const flushingRef = useRef(false);
 
   const [activeStatus, setActiveStatus] = useState("all");
   const [activeProperty, setActiveProperty] = useState("All properties");
@@ -203,13 +251,11 @@ export default function App() {
   const [syncError, setSyncError] = useState("");
   const [now, setNow] = useState(new Date());
 
-  // Tick clock every 30s for the date subtitle
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(t);
   }, []);
 
-  // Detect online / offline state from browser
   useEffect(() => {
     const goOnline = () => setIsOnline(true);
     const goOffline = () => setIsOnline(false);
@@ -221,7 +267,6 @@ export default function App() {
     };
   }, []);
 
-  // Try to send a single queued change. Resolves true if succeeded.
   const sendOne = useCallback(async (entry) => {
     if (!webhookUrl) return false;
     try {
@@ -236,7 +281,6 @@ export default function App() {
     }
   }, [webhookUrl]);
 
-  // Flush the entire pending queue in order.
   const flushPendingChanges = useCallback(async () => {
     if (flushingRef.current) return;
     if (!isOnline || !webhookUrl) return;
@@ -245,7 +289,6 @@ export default function App() {
     flushingRef.current = true;
     setFlushing(true);
     try {
-      // Drain in order; on first failure, stop (preserves order for next attempt)
       let remaining = [...pendingQueue];
       while (remaining.length > 0) {
         const entry = remaining[0];
@@ -260,19 +303,16 @@ export default function App() {
     }
   }, [isOnline, webhookUrl, pendingQueue, sendOne, setPendingQueue]);
 
-  // Initial fetch + flush attempt on app boot
   useEffect(() => {
     if (csvUrl) refresh();
     flushPendingChanges();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-flush when coming back online
   useEffect(() => {
     if (isOnline) flushPendingChanges();
   }, [isOnline, flushPendingChanges]);
 
-  // Periodic flush attempt while online
   useEffect(() => {
     if (!isOnline) return;
     const interval = setInterval(() => {
@@ -311,6 +351,8 @@ export default function App() {
           : (t.title + t.property + t.category + t.assignee).toLowerCase().includes(search.toLowerCase())
       )
       .sort((a, b) => {
+        // For archived view, we'll group by month later — just keep stable order here
+        if (activeStatus === ARCHIVED_STATUS) return 0;
         const aDone = a.status === DONE_STATUS || a.status === ARCHIVED_STATUS;
         const bDone = b.status === DONE_STATUS || b.status === ARCHIVED_STATUS;
         if (aDone && !bDone) return 1;
@@ -327,11 +369,9 @@ export default function App() {
     return c;
   }, [tasks, activeProperty]);
 
-  // Enqueue a change. Tries to send immediately if online; otherwise it stays queued.
   const enqueueChange = useCallback((payload) => {
     if (!webhookUrl) return;
 
-    // Check size before adding photo payloads
     if (payload.task?.image || payload.patch?.image) {
       const projected = queueBytes([...pendingQueue, { id: "tmp", payload }]);
       if (projected > STORAGE_WARN_BYTES) {
@@ -341,10 +381,8 @@ export default function App() {
 
     const entry = { id: uuid(), payload, timestamp: Date.now() };
     setPendingQueue((q) => [...q, entry]);
-    // Don't await — flushPendingChanges will run on next render due to queue change
   }, [webhookUrl, pendingQueue, setPendingQueue]);
 
-  // Trigger a flush when queue grows
   useEffect(() => {
     if (pendingQueue.length > 0 && isOnline) {
       flushPendingChanges();
@@ -363,7 +401,9 @@ export default function App() {
   };
 
   const archiveTask = (id) => {
+    const archivedIso = new Date().toISOString();
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: ARCHIVED_STATUS } : t)));
+    setArchivedAtMap((prev) => ({ ...prev, [id]: archivedIso }));
     setOpenTask(null);
     enqueueChange({ action: "update", id, patch: { status: ARCHIVED_STATUS } });
   };
@@ -380,10 +420,8 @@ export default function App() {
   const refresh = async () => {
     setSyncError("");
 
-    // If there are pending changes, flush them first to avoid sheet overwriting unsynced edits
     if (pendingQueue.length > 0 && isOnline) {
       await flushPendingChanges();
-      // If queue still has entries after flush attempt, skip the destructive refresh
       if (pendingQueue.length > 0) {
         setSyncError("Cannot pull fresh data while changes are unsynced");
         return;
@@ -419,6 +457,7 @@ export default function App() {
   ];
 
   const pendingCount = pendingQueue.length;
+  const isArchivedView = activeStatus === ARCHIVED_STATUS;
 
   return (
     <div
@@ -501,6 +540,12 @@ export default function App() {
               <p className="font-display text-lg" style={{ color: "#0F0F0F" }}>All clear</p>
               <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>No tasks match these filters.</p>
             </div>
+          ) : isArchivedView ? (
+            <ArchivedListView
+              tasks={filtered}
+              archivedAtMap={archivedAtMap}
+              onTaskClick={setOpenTask}
+            />
           ) : (
             <div className="px-4 pb-32 space-y-2">
               {filtered.map((t) => (
@@ -518,6 +563,7 @@ export default function App() {
           <TaskDetailSheet
             task={openTask}
             createdAt={createdAtMap[openTask.id]}
+            archivedAt={archivedAtMap[openTask.id]}
             team={teamOptions}
             onClose={() => setOpenTask(null)}
             onUpdate={(patch) => updateTask(openTask.id, patch)}
@@ -550,6 +596,82 @@ export default function App() {
   );
 }
 
+// ---------- Archived view: month-grouped, recent expanded ----------
+function ArchivedListView({ tasks, archivedAtMap, onTaskClick }) {
+  const buckets = useMemo(() => bucketByArchivedMonth(tasks, archivedAtMap), [tasks, archivedAtMap]);
+
+  // Track which months are open. Default: only the first (most recent) month is open.
+  const [openMonths, setOpenMonths] = useState(() => {
+    if (buckets.length > 0) return new Set([buckets[0].key]);
+    return new Set();
+  });
+
+  // Re-sync openMonths if buckets change (e.g. new archive added)
+  useEffect(() => {
+    if (buckets.length > 0) {
+      setOpenMonths((prev) => {
+        const next = new Set(prev);
+        // If the most recent bucket isn't tracked yet, expand it
+        if (!next.has(buckets[0].key) && prev.size === 0) {
+          next.add(buckets[0].key);
+        }
+        return next;
+      });
+    }
+  }, [buckets]);
+
+  const toggleMonth = (key) => {
+    setOpenMonths((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div className="px-4 pb-32 space-y-3">
+      {buckets.map((bucket) => {
+        const isOpen = openMonths.has(bucket.key);
+        return (
+          <div key={bucket.key}>
+            <button
+              onClick={() => toggleMonth(bucket.key)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98] mb-2"
+              style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)", color: "#0F0F0F" }}
+            >
+              <span className="flex items-center gap-2">
+                <ChevronRight
+                  size={14}
+                  style={{
+                    color: "#8A7A5C",
+                    transform: isOpen ? "rotate(90deg)" : "none",
+                    transition: "transform 200ms",
+                  }}
+                />
+                <span>{bucket.label}</span>
+              </span>
+              <span
+                className="px-1.5 rounded-full"
+                style={{ fontSize: "10px", background: "rgba(0,0,0,0.05)" }}
+              >
+                {bucket.tasks.length}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="space-y-2 mb-3">
+                {bucket.tasks.map((t) => (
+                  <TaskCard key={t.id} task={t} onClick={() => onTaskClick(t)} onToggle={() => {}} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---------- Sync banner ----------
 function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
   if (syncError) {
@@ -559,7 +681,6 @@ function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
       </div>
     );
   }
-
   if (!isOnline && pendingCount > 0) {
     return (
       <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#FEF3C7", color: "#92400E" }}>
@@ -567,7 +688,6 @@ function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
       </div>
     );
   }
-
   if (!isOnline) {
     return (
       <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#FEF3C7", color: "#92400E" }}>
@@ -575,7 +695,6 @@ function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
       </div>
     );
   }
-
   if (flushing && pendingCount > 0) {
     return (
       <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#DBEAFE", color: "#1E40AF" }}>
@@ -583,7 +702,6 @@ function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
       </div>
     );
   }
-
   if (pendingCount > 0) {
     return (
       <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#DBEAFE", color: "#1E40AF" }}>
@@ -591,7 +709,6 @@ function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
       </div>
     );
   }
-
   return null;
 }
 
@@ -761,7 +878,7 @@ function AssigneeDropdown({ value, onChange, options, allowCustom }) {
   );
 }
 
-function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onArchive }) {
+function TaskDetailSheet({ task, createdAt, archivedAt, team, tasks, onClose, onUpdate, onArchive }) {
   const due = fmtDue(task.dueDate);
   const isArchived = task.status === ARCHIVED_STATUS;
   const status = isArchived ? ARCHIVED_STYLE : (STATUSES[task.status] || STATUSES.Pending);
@@ -801,6 +918,7 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onAr
 
   const photoSrc = driveImageSrc(task.photoUrl) || task.image;
   const createdLine = fmtCreatedAt(createdAt);
+  const archivedLine = fmtCreatedAt(archivedAt);
 
   return (
     <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
@@ -818,8 +936,12 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onAr
           </div>
           <h2 className="font-display text-2xl leading-tight mb-2" style={{ color: "#0F0F0F", fontWeight: 500 }}>{task.title}</h2>
           {createdLine && (
-            <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>Created {createdLine}</p>
+            <p className="text-xs" style={{ color: "#8A7A5C" }}>Created {createdLine}</p>
           )}
+          {isArchived && archivedLine && (
+            <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>Archived {archivedLine}</p>
+          )}
+          {(!isArchived || !archivedLine) && createdLine && <div className="mb-4" />}
 
           <div className="mb-4">
             <p className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Photo</p>
