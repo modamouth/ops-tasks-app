@@ -172,8 +172,23 @@ const nextIdFor = (property, tasks) => {
 
 const phoneFor = (assignee, tasks) => {
   if (!assignee || assignee === "Unassigned") return "";
-  const match = tasks.find((t) => t.assignee === assignee && t.phone);
-  return match ? match.phone : "";
+  // Count how often each phone appears for this assignee
+  const counts = {};
+  for (const t of tasks) {
+    if (t.assignee === assignee && t.phone) {
+      counts[t.phone] = (counts[t.phone] || 0) + 1;
+    }
+  }
+  // Return the most-used phone, falling back to first match if tied
+  let bestPhone = "";
+  let bestCount = 0;
+  for (const phone in counts) {
+    if (counts[phone] > bestCount) {
+      bestCount = counts[phone];
+      bestPhone = phone;
+    }
+  }
+  return bestPhone;
 };
 
 const queueBytes = (queue) => {
