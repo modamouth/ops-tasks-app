@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Papa from "papaparse";
 import {
   Search, Plus, MapPin, Clock, X, Check, AlertCircle, Settings,
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
+  Wifi, WifiOff,
 } from "lucide-react";
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
@@ -11,7 +12,6 @@ const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "";
 const ENV_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
 
 // ---------- CONFIG ----------
-// Active statuses — visible in detail sheet status pills
 const STATUSES = {
   Pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7" },
   "In Progress": { label: "In progress", color: "#1D4ED8", bg: "#DBEAFE" },
@@ -20,35 +20,25 @@ const STATUSES = {
 const STATUS_KEYS = Object.keys(STATUSES);
 const DONE_STATUS = "Done";
 const ARCHIVED_STATUS = "Archived";
-
-// Style for archived (kept separate so it's not in active status pills)
 const ARCHIVED_STYLE = { label: "Archived", color: "#6B7280", bg: "#F3F4F6" };
 
-// Photo upload constraints — kept small for fast uploads on mobile data
+// Photo upload constraints
 const MAX_PHOTO_WIDTH = 1024;
 const PHOTO_QUALITY = 0.82;
 
-// Avatar color palette — deterministic per name
+// Offline / sync config
+const FLUSH_INTERVAL_MS = 30000; // try to flush queue every 30 seconds when online
+const STORAGE_WARN_BYTES = 4 * 1024 * 1024; // warn if pending queue exceeds 4 MB
+
+// Avatar palette
 const AVATAR_PALETTE = ["#0F4C5C", "#7C2D12", "#374151", "#5B21B6", "#9F1239", "#065F46", "#9A3412", "#1E3A8A"];
 
-// Master property list — rebuild needed when adding new ones.
+// Master property list
 const MASTER_PROPERTIES = [
-  "269 Independence",
-  "44 On Post",
-  "Arandis",
-  "Forum Building",
-  "Katutura",
-  "Keetmans",
-  "Kenya House",
-  "Maerua Lifestyle",
-  "Mediva House",
-  "Mutual Tower",
-  "Ondangwa",
-  "Oshakati",
-  "Oshikango",
-  "Otjivanda",
-  "Rehoboth",
-  "Schuster House",
+  "269 Independence", "44 On Post", "Arandis", "Forum Building",
+  "Katutura", "Keetmans", "Kenya House", "Maerua Lifestyle",
+  "Mediva House", "Mutual Tower", "Ondangwa", "Oshakati",
+  "Oshikango", "Otjivanda", "Rehoboth", "Schuster House",
 ];
 
 const SEED_TASKS = [
@@ -83,11 +73,8 @@ const fmtCreatedAt = (iso) => {
   const d = new Date(iso);
   if (isNaN(d)) return "";
   return d.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
+    day: "numeric", month: "short",
+    hour: "2-digit", minute: "2-digit", hour12: false,
   }).replace(",", " at");
 };
 
@@ -100,7 +87,7 @@ const timeAgo = (iso) => {
   return `${Math.floor(hrs / 24)}d ago`;
 };
 
-// Resize an image file to a max width while keeping aspect ratio.
+// Resize image to max width before upload
 const resizeImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -125,14 +112,16 @@ const resizeImage = (file) => {
   });
 };
 
-// Convert a Google Drive shareable URL into a directly-displayable image src.
-// Uses the thumbnail API which is reliable for <img> embedding (works around ORB/CORS).
+// Convert Drive URL to a directly-displayable image src
 const driveImageSrc = (url) => {
   if (!url) return "";
   const idMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (idMatch) return `https://drive.google.com/thumbnail?id=${idMatch[1]}&sz=w1600`;
   return url;
 };
+
+// Quick UUID for queue entries
+const uuid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 function usePersistedState(key, defaultValue) {
   const [state, setState] = useState(() => {
@@ -156,7 +145,6 @@ const rowToTask = (row) => ({
   category: row["Category"] || "",
   assignee: row["Assigned To"] || "Unassigned",
   phone: row["Phone Number"] || "",
-  // Allow Archived through too — used for filtering, not for default "All" view
   status: STATUS_KEYS.includes(row["Status"]) || row["Status"] === ARCHIVED_STATUS
     ? row["Status"]
     : "Pending",
@@ -180,15 +168,29 @@ const phoneFor = (assignee, tasks) => {
   return match ? match.phone : "";
 };
 
+// Estimate localStorage usage of pending queue (rough byte size)
+const queueBytes = (queue) => {
+  try {
+    return new Blob([JSON.stringify(queue)]).size;
+  } catch {
+    return 0;
+  }
+};
+
 // ---------- Main ----------
 export default function App() {
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
   const [createdAtMap, setCreatedAtMap] = usePersistedState("ops.createdAt", {});
+  const [pendingQueue, setPendingQueue] = usePersistedState("ops.pendingChanges", []);
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
 
   const csvUrl = ENV_CSV_URL || csvOverride;
   const webhookUrl = ENV_WEBHOOK_URL || webhookOverride;
+
+  const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  const [flushing, setFlushing] = useState(false);
+  const flushingRef = useRef(false); // prevent overlapping flushes
 
   const [activeStatus, setActiveStatus] = useState("all");
   const [activeProperty, setActiveProperty] = useState("All properties");
@@ -201,15 +203,83 @@ export default function App() {
   const [syncError, setSyncError] = useState("");
   const [now, setNow] = useState(new Date());
 
+  // Tick clock every 30s for the date subtitle
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(t);
   }, []);
 
+  // Detect online / offline state from browser
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  // Try to send a single queued change. Resolves true if succeeded.
+  const sendOne = useCallback(async (entry) => {
+    if (!webhookUrl) return false;
+    try {
+      const res = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entry.payload),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, [webhookUrl]);
+
+  // Flush the entire pending queue in order.
+  const flushPendingChanges = useCallback(async () => {
+    if (flushingRef.current) return;
+    if (!isOnline || !webhookUrl) return;
+    if (pendingQueue.length === 0) return;
+
+    flushingRef.current = true;
+    setFlushing(true);
+    try {
+      // Drain in order; on first failure, stop (preserves order for next attempt)
+      let remaining = [...pendingQueue];
+      while (remaining.length > 0) {
+        const entry = remaining[0];
+        const ok = await sendOne(entry);
+        if (!ok) break;
+        remaining = remaining.slice(1);
+        setPendingQueue(remaining);
+      }
+    } finally {
+      flushingRef.current = false;
+      setFlushing(false);
+    }
+  }, [isOnline, webhookUrl, pendingQueue, sendOne, setPendingQueue]);
+
+  // Initial fetch + flush attempt on app boot
   useEffect(() => {
     if (csvUrl) refresh();
+    flushPendingChanges();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-flush when coming back online
+  useEffect(() => {
+    if (isOnline) flushPendingChanges();
+  }, [isOnline, flushPendingChanges]);
+
+  // Periodic flush attempt while online
+  useEffect(() => {
+    if (!isOnline) return;
+    const interval = setInterval(() => {
+      if (pendingQueue.length > 0) flushPendingChanges();
+    }, FLUSH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [isOnline, pendingQueue.length, flushPendingChanges]);
 
   const propertyOptions = useMemo(() => {
     const fromTasks = new Set(tasks.map((t) => t.property).filter(Boolean));
@@ -231,10 +301,7 @@ export default function App() {
   const filtered = useMemo(() => {
     return tasks
       .filter((t) => {
-        if (activeStatus === "all") {
-          // Default view: hide archived
-          return t.status !== ARCHIVED_STATUS;
-        }
+        if (activeStatus === "all") return t.status !== ARCHIVED_STATUS;
         return t.status === activeStatus;
       })
       .filter((t) => activeProperty === "All properties" || t.property === activeProperty)
@@ -260,31 +327,45 @@ export default function App() {
     return c;
   }, [tasks, activeProperty]);
 
-  const pushChange = (payload) => {
+  // Enqueue a change. Tries to send immediately if online; otherwise it stays queued.
+  const enqueueChange = useCallback((payload) => {
     if (!webhookUrl) return;
-    fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-  };
+
+    // Check size before adding photo payloads
+    if (payload.task?.image || payload.patch?.image) {
+      const projected = queueBytes([...pendingQueue, { id: "tmp", payload }]);
+      if (projected > STORAGE_WARN_BYTES) {
+        alert(`Pending changes are getting large (${(projected / 1024 / 1024).toFixed(1)} MB).\n\nReconnect to sync existing changes before adding more photos.`);
+      }
+    }
+
+    const entry = { id: uuid(), payload, timestamp: Date.now() };
+    setPendingQueue((q) => [...q, entry]);
+    // Don't await — flushPendingChanges will run on next render due to queue change
+  }, [webhookUrl, pendingQueue, setPendingQueue]);
+
+  // Trigger a flush when queue grows
+  useEffect(() => {
+    if (pendingQueue.length > 0 && isOnline) {
+      flushPendingChanges();
+    }
+  }, [pendingQueue.length, isOnline, flushPendingChanges]);
 
   const updateTask = (id, patch) => {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     setOpenTask((cur) => (cur && cur.id === id ? { ...cur, ...patch } : cur));
 
     if (patch.status === DONE_STATUS) {
-      pushChange({ action: "complete", id, patch });
+      enqueueChange({ action: "complete", id, patch });
     } else {
-      pushChange({ action: "update", id, patch });
+      enqueueChange({ action: "update", id, patch });
     }
   };
 
   const archiveTask = (id) => {
-    // Archive sets status; uses update action so it doesn't trigger completion notifications
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, status: ARCHIVED_STATUS } : t)));
     setOpenTask(null);
-    pushChange({ action: "update", id, patch: { status: ARCHIVED_STATUS } });
+    enqueueChange({ action: "update", id, patch: { status: ARCHIVED_STATUS } });
   };
 
   const addTask = (data) => {
@@ -293,11 +374,22 @@ export default function App() {
     const createdIso = new Date().toISOString();
     setTasks((prev) => [t, ...prev]);
     setCreatedAtMap((prev) => ({ ...prev, [id]: createdIso }));
-    pushChange({ action: "create", task: t });
+    enqueueChange({ action: "create", task: t });
   };
 
   const refresh = async () => {
     setSyncError("");
+
+    // If there are pending changes, flush them first to avoid sheet overwriting unsynced edits
+    if (pendingQueue.length > 0 && isOnline) {
+      await flushPendingChanges();
+      // If queue still has entries after flush attempt, skip the destructive refresh
+      if (pendingQueue.length > 0) {
+        setSyncError("Cannot pull fresh data while changes are unsynced");
+        return;
+      }
+    }
+
     setSyncing(true);
     if (!csvUrl) {
       await new Promise((r) => setTimeout(r, 400));
@@ -320,12 +412,13 @@ export default function App() {
     }
   };
 
-  // Filter chips for status — "All" first, active statuses, then "Archived" at the end
   const statusChips = [
     { key: "all", label: "All" },
     ...STATUS_KEYS.map((k) => ({ key: k, label: STATUSES[k].label })),
     { key: ARCHIVED_STATUS, label: ARCHIVED_STYLE.label },
   ];
+
+  const pendingCount = pendingQueue.length;
 
   return (
     <div
@@ -386,13 +479,14 @@ export default function App() {
           ))}
         </div>
 
-        {syncError && (
-          <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#FEE2E2", color: "#991B1B" }}>
-            <AlertCircle size={12} />Sync failed: {syncError}
-          </div>
-        )}
+        <SyncBanner
+          isOnline={isOnline}
+          flushing={flushing}
+          pendingCount={pendingCount}
+          syncError={syncError}
+        />
 
-        <div className="overflow-y-auto scrollbar-hide" style={{ height: `calc(100% - ${syncError ? 314 : 282}px)`, background: "#FAF6EE" }}>
+        <div className="overflow-y-auto scrollbar-hide" style={{ height: `calc(100% - ${(syncError || !isOnline || pendingCount > 0) ? 312 : 282}px)`, background: "#FAF6EE" }}>
           <div className="px-4 py-3 flex items-center justify-between">
             <p className="text-xs" style={{ color: "#8A7A5C" }}>
               {filtered.length} {filtered.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
@@ -454,6 +548,51 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+// ---------- Sync banner ----------
+function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
+  if (syncError) {
+    return (
+      <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#FEE2E2", color: "#991B1B" }}>
+        <AlertCircle size={12} /> Sync failed: {syncError}
+      </div>
+    );
+  }
+
+  if (!isOnline && pendingCount > 0) {
+    return (
+      <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#FEF3C7", color: "#92400E" }}>
+        <WifiOff size={12} /> Offline · {pendingCount} unsynced {pendingCount === 1 ? "change" : "changes"} (will sync when online)
+      </div>
+    );
+  }
+
+  if (!isOnline) {
+    return (
+      <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#FEF3C7", color: "#92400E" }}>
+        <WifiOff size={12} /> Offline · changes will sync when you reconnect
+      </div>
+    );
+  }
+
+  if (flushing && pendingCount > 0) {
+    return (
+      <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#DBEAFE", color: "#1E40AF" }}>
+        <Loader2 size={12} className="animate-spin" /> Syncing {pendingCount} {pendingCount === 1 ? "change" : "changes"}...
+      </div>
+    );
+  }
+
+  if (pendingCount > 0) {
+    return (
+      <div className="px-5 py-2 text-xs flex items-center gap-2" style={{ background: "#DBEAFE", color: "#1E40AF" }}>
+        <Wifi size={12} /> {pendingCount} {pendingCount === 1 ? "change" : "changes"} pending sync
+      </div>
+    );
+  }
+
+  return null;
 }
 
 // ---------- Task card ----------
@@ -642,9 +781,7 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onAr
   };
 
   const handleDueDateSave = () => {
-    if (tempDueDate !== task.dueDate) {
-      onUpdate({ dueDate: tempDueDate });
-    }
+    if (tempDueDate !== task.dueDate) onUpdate({ dueDate: tempDueDate });
     setEditingDueDate(false);
   };
 
@@ -684,7 +821,6 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onAr
             <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>Created {createdLine}</p>
           )}
 
-          {/* Photo section */}
           <div className="mb-4">
             <p className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Photo</p>
             {photoSrc ? (
@@ -768,7 +904,6 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onAr
             </div>
           </div>
 
-          {/* Delete / Archive button */}
           {!isArchived && (
             <div className="mb-2">
               {confirmingArchive ? (
@@ -812,7 +947,6 @@ function TaskDetailSheet({ task, createdAt, team, tasks, onClose, onUpdate, onAr
           )}
         </div>
 
-        {/* Full-screen photo viewer */}
         {photoViewerOpen && photoSrc && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center"
@@ -867,9 +1001,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
 
   const handleAssigneeChange = (name) => {
     setAssignee(name);
-    if (!phoneEdited) {
-      setPhone(phoneFor(name, tasks));
-    }
+    if (!phoneEdited) setPhone(phoneFor(name, tasks));
   };
 
   const handleImageChange = async (e) => {
@@ -929,22 +1061,10 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
             <input value={customCategory} onChange={(e) => setCustomCategory(e.target.value)} placeholder="Or type a new category..." className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
           </FieldGroup>
           <p className="uppercase mb-2 mt-4" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Assign to</p>
-          <AssigneeDropdown
-            value={assignee}
-            onChange={handleAssigneeChange}
-            options={team}
-            allowCustom={true}
-          />
+          <AssigneeDropdown value={assignee} onChange={handleAssigneeChange} options={team} allowCustom={true} />
           <div className="mt-4" />
           <FieldGroup label="Phone (for WhatsApp)">
-            <input
-              value={phone}
-              onChange={(e) => { setPhone(e.target.value); setPhoneEdited(true); }}
-              placeholder="Auto-filled from assignee"
-              inputMode="tel"
-              className="w-full bg-transparent outline-none text-sm font-medium"
-              style={{ color: "#0F0F0F" }}
-            />
+            <input value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneEdited(true); }} placeholder="Auto-filled from assignee" inputMode="tel" className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
           </FieldGroup>
           <FieldGroup label="Due date">
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
@@ -953,25 +1073,13 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
             {image ? (
               <div className="space-y-2">
                 <img src={image} alt="Preview" className="w-full rounded-lg max-h-48 object-cover" />
-                <button
-                  type="button"
-                  onClick={removeImage}
-                  className="w-full px-3 py-2 rounded-lg text-sm font-semibold transition active:scale-95"
-                  style={{ background: "#FEE2E2", color: "#991B1B" }}
-                >
+                <button type="button" onClick={removeImage} className="w-full px-3 py-2 rounded-lg text-sm font-semibold transition active:scale-95" style={{ background: "#FEE2E2", color: "#991B1B" }}>
                   Remove image
                 </button>
               </div>
             ) : (
               <label className="w-full">
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleImageChange}
-                  className="hidden"
-                  disabled={imageProcessing}
-                />
+                <input type="file" accept="image/*" capture="environment" onChange={handleImageChange} className="hidden" disabled={imageProcessing} />
                 <div className="w-full px-3 py-2 rounded-lg text-sm font-semibold text-center cursor-pointer transition active:scale-95 flex items-center justify-center gap-2" style={{ background: "#DBEAFE", color: "#1D4ED8" }}>
                   {imageProcessing ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
                   {imageProcessing ? "Processing..." : "Take photo or upload image"}
