@@ -972,14 +972,14 @@ function TaskDetailSheet({ task, createdAt, archivedAt, team, tasks, onClose, on
                 <label className="absolute bottom-2 right-2 px-2 py-1 rounded-md text-xs font-semibold cursor-pointer flex items-center gap-1" style={{ background: "rgba(0,0,0,0.6)", color: "white" }}>
                   {uploadingPhoto ? <Loader2 size={11} className="animate-spin" /> : null}
                   {uploadingPhoto ? "Uploading..." : "Replace"}
-                  <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} className="hidden" disabled={uploadingPhoto} />
+                  <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" disabled={uploadingPhoto} />
                 </label>
               </div>
             ) : (
               <label className="flex items-center justify-center gap-2 w-full py-6 rounded-xl text-sm font-medium cursor-pointer" style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
                 {uploadingPhoto ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
                 {uploadingPhoto ? "Uploading..." : "Add photo"}
-                <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} className="hidden" disabled={uploadingPhoto} />
+                <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" disabled={uploadingPhoto} />
               </label>
             )}
           </div>
@@ -1216,7 +1216,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
               </div>
             ) : (
               <label className="w-full">
-                <input type="file" accept="image/*" capture="environment" onChange={handleImageChange} className="hidden" disabled={imageProcessing} />
+                <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" disabled={imageProcessing} />
                 <div className="w-full px-3 py-2 rounded-lg text-sm font-semibold text-center cursor-pointer transition active:scale-95 flex items-center justify-center gap-2" style={{ background: "#DBEAFE", color: "#1D4ED8" }}>
                   {imageProcessing ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
                   {imageProcessing ? "Processing..." : "Take photo or upload image"}
