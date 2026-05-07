@@ -900,9 +900,18 @@ function TaskDetailSheet({ task, createdAt, archivedAt, team, tasks, onClose, on
   const waLink = task.phone ? `https://wa.me/${task.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(`Hi ${task.assignee}, regarding ${task.id}: ${task.title}`)}` : null;
   const [editingDueDate, setEditingDueDate] = useState(false);
   const [tempDueDate, setTempDueDate] = useState(task.dueDate);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState(task.title);
   const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [confirmingArchive, setConfirmingArchive] = useState(false);
+
+  useEffect(() => {
+    setTempTitle(task.title);
+    setTempDueDate(task.dueDate);
+    setEditingTitle(false);
+    setEditingDueDate(false);
+  }, [task.id, task.title, task.dueDate]);
 
   const handleAssigneeChange = (name) => {
     const knownPhone = phoneFor(name, tasks);
@@ -910,6 +919,13 @@ function TaskDetailSheet({ task, createdAt, archivedAt, team, tasks, onClose, on
     if (knownPhone && !task.phone) patch.phone = knownPhone;
     if (knownPhone && task.phone && task.assignee !== name) patch.phone = knownPhone;
     onUpdate(patch);
+  };
+
+  const handleTitleSave = () => {
+    const nextTitle = tempTitle.trim();
+    if (!nextTitle) return;
+    if (nextTitle !== task.title) onUpdate({ title: nextTitle });
+    setEditingTitle(false);
   };
 
   const handleDueDateSave = () => {
@@ -949,7 +965,45 @@ function TaskDetailSheet({ task, createdAt, archivedAt, team, tasks, onClose, on
             <span className="px-2 py-1 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
             {task.category && <span className="px-2 py-1 rounded-md font-semibold uppercase flex items-center gap-1" style={{ fontSize: "10px", background: "white", color: "#374151", border: "1px solid rgba(0,0,0,0.08)", letterSpacing: "0.05em" }}><Tag size={10} />{task.category}</span>}
           </div>
-          <h2 className="font-display text-2xl leading-tight mb-2" style={{ color: "#0F0F0F", fontWeight: 500 }}>{task.title}</h2>
+          <div className="mb-2 flex flex-col gap-2">
+            {editingTitle ? (
+              <div className="space-y-2">
+                <textarea
+                  value={tempTitle}
+                  onChange={(e) => setTempTitle(e.target.value)}
+                  rows={3}
+                  className="w-full bg-transparent outline-none font-display text-2xl leading-tight resize-none"
+                  style={{ color: "#0F0F0F", fontWeight: 500 }}
+                  autoFocus
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleTitleSave}
+                    disabled={tempTitle.trim() === task.title.trim() || tempTitle.trim() === ""}
+                    className="px-3 py-2 rounded-xl text-sm font-semibold transition active:scale-95"
+                    style={{ background: tempTitle.trim() === task.title.trim() || tempTitle.trim() === "" ? "#E5E7EB" : "#0F0F0F", color: tempTitle.trim() === task.title.trim() || tempTitle.trim() === "" ? "#9CA3AF" : "white" }}
+                  >
+                    Save description
+                  </button>
+                  <button
+                    onClick={() => { setTempTitle(task.title); setEditingTitle(false); }}
+                    className="px-3 py-2 rounded-xl text-sm font-semibold transition active:scale-95"
+                    style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <h2
+                className="font-display text-2xl leading-tight mb-0 cursor-text"
+                style={{ color: "#0F0F0F", fontWeight: 500 }}
+                onClick={() => setEditingTitle(true)}
+              >
+                {task.title}
+              </h2>
+            )}
+          </div>
           {createdLine && (
             <p className="text-xs" style={{ color: "#8A7A5C" }}>Created {createdLine}</p>
           )}
