@@ -360,11 +360,13 @@ export default function App() {
         return t.status === activeStatus;
       })
       .filter((t) => activeProperty === "All properties" || t.property === activeProperty)
-      .filter((t) =>
-        search.trim() === ""
-          ? true
-          : (t.title + t.property + t.category + t.assignee).toLowerCase().includes(search.toLowerCase())
-      )
+      .filter((t) => {
+        const q = search.trim();
+        if (!q) return true;
+        const isPersonSearch = teamOptions.some((n) => n.toLowerCase() === q.toLowerCase());
+        if (isPersonSearch) return t.assignee.toLowerCase() === q.toLowerCase();
+        return (t.title + t.property + t.category + t.assignee).toLowerCase().includes(q.toLowerCase());
+      })
       .sort((a, b) => {
         // For archived view, we'll group by month later — just keep stable order here
         if (activeStatus === ARCHIVED_STATUS) return 0;
