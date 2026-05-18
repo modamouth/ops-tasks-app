@@ -621,14 +621,6 @@ export default function App() {
           />
         )}
       </div>
-      {due.overdue && !done && !isArchived && (
-        <div className="flex items-center gap-1.5 mt-3 -mx-4 -mb-4 px-4 py-2 rounded-b-2xl" style={{ background: "#FEF2F2", borderTop: "1px solid rgba(185,28,28,0.1)" }}>
-          <AlertCircle size={11} style={{ color: "#B91C1C", flexShrink: 0 }} />
-          <span className="text-xs font-semibold" style={{ color: "#B91C1C" }}>
-            {due.daysOverdue === 0 ? "Overdue today" : due.daysOverdue === 1 ? "1 day overdue" : `${due.daysOverdue} days overdue`}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
@@ -796,6 +788,14 @@ function TaskCard({ task, onClick, onToggle, onAssigneeClick }) {
           />
         )}
       </div>
+      {due.overdue && !done && !isArchived && (
+        <div className="flex items-center gap-1.5 mt-3 -mx-4 -mb-4 px-4 py-2 rounded-b-2xl" style={{ background: "#FEF2F2", borderTop: "1px solid rgba(185,28,28,0.1)" }}>
+          <AlertCircle size={11} style={{ color: "#B91C1C", flexShrink: 0 }} />
+          <span className="text-xs font-semibold" style={{ color: "#B91C1C" }}>
+            {due.daysOverdue === 0 ? "Overdue today" : due.daysOverdue === 1 ? "1 day overdue" : `${due.daysOverdue} days overdue`}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
