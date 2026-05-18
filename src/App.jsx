@@ -519,9 +519,17 @@ export default function App() {
 
           <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
             <Search size={15} style={{ color: "#8A7A5C" }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks, locations..." className="flex-1 bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks, people, locations..." className="flex-1 bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
             {search && <button onClick={() => setSearch("")}><X size={14} style={{ color: "#8A7A5C" }} /></button>}
           </div>
+          {search.trim() && teamOptions.some((n) => n.toLowerCase() === search.trim().toLowerCase()) && (
+            <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-xl fade-anim" style={{ background: "rgba(15,79,92,0.08)", border: "1px solid rgba(15,79,92,0.15)" }}>
+              <Avatar name={teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase())} size={18} />
+              <span className="text-xs font-medium" style={{ color: "#0F4C5C" }}>
+                Showing all tasks for {teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase())}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
@@ -560,11 +568,12 @@ export default function App() {
               tasks={filtered}
               archivedAtMap={archivedAtMap}
               onTaskClick={setOpenTask}
+              onAssigneeClick={(name) => setSearch(name)}
             />
           ) : (
             <div className="px-4 pb-32 space-y-2">
               {filtered.map((t) => (
-                <TaskCard key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
+                <TaskCard key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} onAssigneeClick={(name) => setSearch(name)} />
               ))}
             </div>
           )}
@@ -612,7 +621,7 @@ export default function App() {
 }
 
 // ---------- Archived view: month-grouped, recent expanded ----------
-function ArchivedListView({ tasks, archivedAtMap, onTaskClick }) {
+function ArchivedListView({ tasks, archivedAtMap, onTaskClick, onAssigneeClick }) {
   const buckets = useMemo(() => bucketByArchivedMonth(tasks, archivedAtMap), [tasks, archivedAtMap]);
 
   // Track which months are open. Default: only the first (most recent) month is open.
@@ -676,7 +685,7 @@ function ArchivedListView({ tasks, archivedAtMap, onTaskClick }) {
             {isOpen && (
               <div className="space-y-2 mb-3">
                 {bucket.tasks.map((t) => (
-                  <TaskCard key={t.id} task={t} onClick={() => onTaskClick(t)} onToggle={() => {}} />
+                  <TaskCard key={t.id} task={t} onClick={() => onTaskClick(t)} onToggle={() => {}} onAssigneeClick={onAssigneeClick} />
                 ))}
               </div>
             )}
@@ -728,7 +737,7 @@ function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
 }
 
 // ---------- Task card ----------
-function TaskCard({ task, onClick, onToggle }) {
+function TaskCard({ task, onClick, onToggle, onAssigneeClick }) {
   const due = fmtDue(task.dueDate);
   const isArchived = task.status === ARCHIVED_STATUS;
   const status = isArchived ? ARCHIVED_STYLE : (STATUSES[task.status] || STATUSES.Pending);
@@ -752,10 +761,14 @@ function TaskCard({ task, onClick, onToggle }) {
             <span className="flex items-center gap-1 truncate"><MapPin size={11} /><span className="truncate">{task.property}</span></span>
           </div>
           <div className="flex items-center justify-between mt-2.5">
-            <div className="flex items-center gap-2">
+            <button
+              className="flex items-center gap-2 rounded-lg px-1.5 py-0.5 -mx-1.5 transition-all active:scale-95"
+              style={{ background: "transparent" }}
+              onClick={(e) => { e.stopPropagation(); onAssigneeClick && onAssigneeClick(task.assignee); }}
+            >
               <Avatar name={task.assignee} size={20} />
               <span className="text-xs font-medium" style={{ color: "#0F0F0F" }}>{task.assignee}</span>
-            </div>
+            </button>
             <span className="flex items-center gap-1 text-xs font-medium" style={{ color: due.overdue ? "#B91C1C" : due.urgent ? "#C2410C" : "#8A7A5C" }}>
               <Clock size={11} />{due.text}
             </span>
