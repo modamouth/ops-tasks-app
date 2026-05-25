@@ -194,6 +194,46 @@ const phoneFor = (assignee, tasks) => {
   return bestPhone;
 };
 
+const RECUR_OPTIONS = [
+  { value: "none", label: "Once-off" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "quarterly", label: "Quarterly" },
+  { value: "annually", label: "Annually" },
+];
+
+const WEEK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// currentDue (YYYY-MM-DD) is used as the base for quarterly/annually calculations.
+const nextRecurringDue = (recurring, recurringDay, currentDue) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (recurring === "weekly") {
+    const target = recurringDay ?? 5;
+    const d = new Date(today);
+    let diff = (target - d.getDay() + 7) % 7;
+    if (diff === 0) diff = 7;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  }
+  if (recurring === "monthly") {
+    const target = recurringDay ?? 1;
+    const d = new Date(today);
+    d.setDate(1);
+    d.setMonth(d.getMonth() + 1);
+    const max = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(target, max));
+    return d.toISOString().slice(0, 10);
+  }
+  if (recurring === "quarterly" || recurring === "annually") {
+    const months = recurring === "quarterly" ? 3 : 12;
+    const base = currentDue ? new Date(currentDue + "T00:00:00") : new Date(today);
+    base.setMonth(base.getMonth() + months);
+    return base.toISOString().slice(0, 10);
+  }
+  return null;
+};
+
 const queueBytes = (queue) => {
   try {
     return new Blob([JSON.stringify(queue)]).size;
@@ -414,6 +454,23 @@ export default function App() {
     setOpenTask((cur) => (cur && cur.id === id ? { ...cur, ...patch } : cur));
 
     if (patch.status === DONE_STATUS) {
+      const task = tasks.find((t) => t.id === id);
+      if (task && task.recurring && task.recurring !== "none") {
+        const nextDue = nextRecurringDue(task.recurring, task.recurringDay, task.dueDate);
+        if (nextDue) {
+          addTask({
+            title: task.title,
+            property: task.property,
+            category: task.category,
+            assignee: task.assignee,
+            phone: task.phone,
+            status: "Pending",
+            dueDate: nextDue,
+            recurring: task.recurring,
+            recurringDay: task.recurringDay,
+          });
+        }
+      }
       enqueueChange({ action: "complete", id, patch });
     } else {
       enqueueChange({ action: "update", id, patch });
@@ -759,6 +816,7 @@ function TaskCard({ task, onClick, onToggle, onAssigneeClick }) {
           <div className="flex items-center gap-2 mb-1.5">
             <span className="px-1.5 py-0.5 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
             {task.category && <span className="text-xs" style={{ color: "#8A7A5C" }}>{task.category}</span>}
+            {task.recurring && task.recurring !== "none" && <RefreshCw size={11} style={{ color: "#8A7A5C" }} />}
             {photoSrc && <Camera size={11} style={{ color: "#8A7A5C" }} />}
           </div>
           <h3 className="font-display text-base leading-snug" style={{ color: "#0F0F0F", fontWeight: 500, textDecoration: (done || isArchived) ? "line-through" : "none" }}>{task.title}</h3>
@@ -1212,6 +1270,9 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
   const [dueDate, setDueDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); });
   const [image, setImage] = useState(null);
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [recurrence, setRecurrence] = useState("none");
+  const [recurDay, setRecurDay] = useState(5); // 5 = Friday
+  const [recurMonthDay, setRecurMonthDay] = useState(() => new Date().getDate());
 
   const valid = title.trim() && property;
   const previewId = property ? nextIdFor(property, tasks) : "—";
@@ -1239,6 +1300,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
 
   const submit = () => {
     if (!valid) return;
+    const recurringDay = recurrence === "weekly" ? recurDay : recurrence === "monthly" ? recurMonthDay : undefined;
     onCreate({
       title: title.trim(),
       property,
@@ -1248,6 +1310,8 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
       status: "Pending",
       dueDate,
       image: image || undefined,
+      recurring: recurrence,
+      recurringDay,
     });
   };
 
@@ -1285,6 +1349,56 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
           </FieldGroup>
           <FieldGroup label="Due date">
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+          </FieldGroup>
+          <FieldGroup label="Recurrence">
+            <div className="flex gap-2 flex-wrap">
+              {RECUR_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setRecurrence(opt.value)}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold transition-all"
+                  style={{
+                    background: recurrence === opt.value ? "#0F0F0F" : "#F5F0E8",
+                    color: recurrence === opt.value ? "#FAF6EE" : "#8A7A5C",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {recurrence === "weekly" && (
+              <div className="flex gap-1.5 mt-3 flex-wrap">
+                {WEEK_DAYS.map((day, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setRecurDay(idx)}
+                    className="w-9 h-9 rounded-full text-xs font-semibold transition-all"
+                    style={{
+                      background: recurDay === idx ? "#8A7A5C" : "#F5F0E8",
+                      color: recurDay === idx ? "#FAF6EE" : "#8A7A5C",
+                    }}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            )}
+            {recurrence === "monthly" && (
+              <div className="flex items-center gap-2 mt-3">
+                <span className="text-xs" style={{ color: "#8A7A5C" }}>Day of month:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={recurMonthDay}
+                  onChange={(e) => setRecurMonthDay(Math.max(1, Math.min(31, Number(e.target.value))))}
+                  className="w-16 text-center rounded-lg px-2 py-1 text-sm font-semibold outline-none"
+                  style={{ background: "#F5F0E8", color: "#0F0F0F" }}
+                />
+              </div>
+            )}
           </FieldGroup>
           <FieldGroup label="Photo">
             {image ? (
