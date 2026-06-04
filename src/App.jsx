@@ -431,13 +431,13 @@ export default function App() {
     return ["Unassigned", ...Array.from(set).sort()];
   }, [tasks]);
 
+  // Step 1: filter by status and search, then sort. Property filter is a separate step below.
   const filtered = useMemo(() => {
     return tasks
       .filter((t) => {
         if (activeStatus === "all") return t.status !== ARCHIVED_STATUS;
         return t.status === activeStatus;
       })
-      .filter((t) => activeProperty === "All properties" || t.property === activeProperty)
       .filter((t) => {
         const q = search.trim().toLowerCase();
         if (!q) return true;
@@ -461,14 +461,20 @@ export default function App() {
         }
         return aDate - bDate;
       });
-  }, [tasks, activeStatus, activeProperty, search, sortBy]);
+  }, [tasks, activeStatus, search, sortBy]);
+
+  // Step 2: apply property filter as a completely separate step.
+  const visibleTasks = useMemo(() => {
+    if (activeProperty === "All properties") return filtered;
+    return filtered.filter((t) => t.property === activeProperty);
+  }, [filtered, activeProperty]);
 
   const groupedTasks = useMemo(() => {
     if (activeStatus === ARCHIVED_STATUS || groupBy === "none" || search.trim()) return null;
     const now = new Date(); now.setHours(0, 0, 0, 0);
     const DAY_MS = 86400000;
     const buckets = new Map();
-    for (const t of filtered) {
+    for (const t of visibleTasks) {
       let key;
       if (groupBy === "property") {
         key = t.property || "No property";
@@ -496,7 +502,7 @@ export default function App() {
       entries.sort(([a], [b]) => a.localeCompare(b));
     }
     return entries.map(([key, tasks]) => ({ key, tasks }));
-  }, [filtered, groupBy, activeStatus, search]);
+  }, [visibleTasks, groupBy, activeStatus, search]);
 
   const counts = useMemo(() => {
     const props = activeProperty === "All properties" ? tasks : tasks.filter((t) => t.property === activeProperty);
@@ -695,18 +701,18 @@ export default function App() {
           {isArchivedView ? (
             <div className="px-4 py-2.5">
               <p className="text-xs" style={{ color: "#8A7A5C" }}>
-                {filtered.length} {filtered.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
+                {visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
               </p>
             </div>
           ) : (
             <SortGroupBar
               groupBy={groupBy} setGroupBy={setGroupBy}
               sortBy={sortBy} setSortBy={setSortBy}
-              count={filtered.length} lastSync={lastSync}
+              count={visibleTasks.length} lastSync={lastSync}
             />
           )}
 
-          {filtered.length === 0 ? (
+          {visibleTasks.length === 0 ? (
             <div className="px-6 py-16 text-center">
               <div className="mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
                 <Inbox size={22} style={{ color: "#8A7A5C" }} />
@@ -716,7 +722,7 @@ export default function App() {
             </div>
           ) : isArchivedView ? (
             <ArchivedListView
-              tasks={filtered}
+              tasks={visibleTasks}
               archivedAtMap={archivedAtMap}
               onTaskClick={setOpenTask}
               onAssigneeClick={(name) => setSearch(name)}
@@ -730,7 +736,7 @@ export default function App() {
           ) : (
             <div className="px-4 pb-32 pt-1">
               <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
-                {filtered.map((t) => (
+                {visibleTasks.map((t) => (
                   <TaskRow key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
                 ))}
               </div>
