@@ -39,12 +39,18 @@ const MASTER_PROPERTIES = [
   "44 On Post",
   "Arandis Convenience Centre",
   "Forum Building",
+  "Katutura Shopping Centre",
+  "Keetmanshoop Shopping Centre",
+  "Kenya House",
   "Maerua Lifestyle Shopping Centre",
+  "Mediva House",
   "Mutual Tower",
   "Ondangwa",
+  "Oshakati Shopping Centre",
   "Oshikango Shopping Centre",
   "Otjivanda Shopping Centre",
   "Rehoboth Shopping Centre",
+  "Schuster House",
   "Windhoek Sanlam Centre",
 ];
 
@@ -89,7 +95,7 @@ const SEED_TASKS = [
 // Bump this string any time SEED_TASKS or MASTER_PROPERTIES change.
 // On first load after a version change, localStorage is cleared so stale
 // cached tasks (with old property names) don't bleed into the new filters.
-const SEED_VERSION = "v4";
+const SEED_VERSION = "v5";
 
 // ---------- Helpers ----------
 const fmtDue = (val) => {
