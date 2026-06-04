@@ -86,6 +86,11 @@ const SEED_TASKS = [
   { id: "SCH-001", title: "Test Image Upload 6", property: "Schuster House", category: "Civil/Glazing", assignee: "Thando", phone: "27711918399", status: "Done", dueDate: "2026-04-29", photoUrl: "https://drive.google.com/file/d/1cnNzhWUvVwax3z8jKSaoLguYv2FVP-oo/view?usp=drivesdk" },
 ];
 
+// Bump this string any time SEED_TASKS or MASTER_PROPERTIES change.
+// On first load after a version change, localStorage is cleared so stale
+// cached tasks (with old property names) don't bleed into the new filters.
+const SEED_VERSION = "v3";
+
 // ---------- Helpers ----------
 const fmtDue = (val) => {
   if (!val) return { text: "—" };
@@ -316,6 +321,18 @@ const bucketByArchivedMonth = (tasks, archivedAtMap) => {
 
 // ---------- Main ----------
 export default function App() {
+  // Clear stale localStorage when seed data version changes.
+  (() => {
+    try {
+      if (localStorage.getItem("ops.seedVersion") !== SEED_VERSION) {
+        ["ops.tasks", "ops.createdAt", "ops.archivedAt", "ops.pendingChanges", "ops.lastSync"].forEach(
+          (k) => localStorage.removeItem(k)
+        );
+        localStorage.setItem("ops.seedVersion", SEED_VERSION);
+      }
+    } catch {}
+  })();
+
   const [tasks, setTasks] = usePersistedState("ops.tasks", SEED_TASKS);
   const [createdAtMap, setCreatedAtMap] = usePersistedState("ops.createdAt", {});
   const [archivedAtMap, setArchivedAtMap] = usePersistedState("ops.archivedAt", {});
