@@ -89,7 +89,7 @@ const SEED_TASKS = [
 // Bump this string any time SEED_TASKS or MASTER_PROPERTIES change.
 // On first load after a version change, localStorage is cleared so stale
 // cached tasks (with old property names) don't bleed into the new filters.
-const SEED_VERSION = "v3";
+const SEED_VERSION = "v4";
 
 // ---------- Helpers ----------
 const fmtDue = (val) => {
@@ -433,9 +433,10 @@ export default function App() {
   // Filter dropdown only shows properties that actually exist in tasks.
   // Avoids phantom MASTER_PROPERTIES entries matching nothing in the CSV.
   const propertyOptions = useMemo(() => {
-    const fromTasks = new Set(tasks.map((t) => t.property).filter(Boolean));
-    return ["All properties", ...Array.from(fromTasks).sort()];
-  }, [tasks]);
+    // MASTER_PROPERTIES is the canonical list — never derive from task data,
+    // which can contain stale/misspelled names from the CSV or localStorage.
+    return ["All properties", ...MASTER_PROPERTIES];
+  }, []);
 
   // New-task form gets the full list so users can pick any known property.
   const newTaskPropertyOptions = useMemo(() => {
