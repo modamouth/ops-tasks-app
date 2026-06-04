@@ -4,7 +4,7 @@ import {
   Search, Plus, MapPin, Clock, X, Check, AlertCircle, Settings,
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
-  Wifi, WifiOff, ChevronRight,
+  Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown,
 } from "lucide-react";
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
@@ -315,6 +315,8 @@ export default function App() {
   const [pendingQueue, setPendingQueue] = usePersistedState("ops.pendingChanges", []);
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
+  const [groupBy, setGroupBy] = usePersistedState("ops.groupBy", "none");
+  const [sortBy, setSortBy] = usePersistedState("ops.sortBy", "overdue");
 
   const csvUrl = ENV_CSV_URL || csvOverride;
   const webhookUrl = ENV_WEBHOOK_URL || webhookOverride;
@@ -429,22 +431,64 @@ export default function App() {
       })
       .filter((t) => activeProperty === "All properties" || t.property === activeProperty)
       .filter((t) => {
-        const q = search.trim();
+        const q = search.trim().toLowerCase();
         if (!q) return true;
-        const isPersonSearch = teamOptions.some((n) => n.toLowerCase() === q.toLowerCase());
-        if (isPersonSearch) return t.assignee.toLowerCase() === q.toLowerCase();
-        return (t.title + t.property + t.category + t.assignee).toLowerCase().includes(q.toLowerCase());
+        return [t.title, t.property, t.category, t.assignee, t.id]
+          .some((f) => (f || "").toLowerCase().includes(q));
       })
       .sort((a, b) => {
-        // For archived view, we'll group by month later — just keep stable order here
         if (activeStatus === ARCHIVED_STATUS) return 0;
-        const aDone = a.status === DONE_STATUS || a.status === ARCHIVED_STATUS;
-        const bDone = b.status === DONE_STATUS || b.status === ARCHIVED_STATUS;
+        const aDone = a.status === DONE_STATUS;
+        const bDone = b.status === DONE_STATUS;
         if (aDone && !bDone) return 1;
         if (bDone && !aDone) return -1;
-        return new Date(a.dueDate || "9999-12-31") - new Date(b.dueDate || "9999-12-31");
+        const aDate = new Date(a.dueDate || "9999-12-31");
+        const bDate = new Date(b.dueDate || "9999-12-31");
+        if (sortBy === "overdue") {
+          const now = new Date();
+          const aOver = aDate < now;
+          const bOver = bDate < now;
+          if (aOver && !bOver) return -1;
+          if (!aOver && bOver) return 1;
+        }
+        return aDate - bDate;
       });
-  }, [tasks, activeStatus, activeProperty, search]);
+  }, [tasks, activeStatus, activeProperty, search, sortBy]);
+
+  const groupedTasks = useMemo(() => {
+    if (activeStatus === ARCHIVED_STATUS || groupBy === "none" || search.trim()) return null;
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const DAY_MS = 86400000;
+    const buckets = new Map();
+    for (const t of filtered) {
+      let key;
+      if (groupBy === "property") {
+        key = t.property || "No property";
+      } else if (groupBy === "assignee") {
+        key = t.assignee || "Unassigned";
+      } else {
+        const d = t.dueDate ? new Date(t.dueDate + "T00:00:00") : null;
+        if (!d || isNaN(d.getTime())) key = "No date";
+        else if (d < now) key = "Overdue";
+        else if (d.getTime() === now.getTime()) key = "Today";
+        else if (d - now < 7 * DAY_MS) key = "This week";
+        else key = "Upcoming";
+      }
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(t);
+    }
+    const entries = Array.from(buckets.entries());
+    if (groupBy === "due") {
+      const order = ["Overdue", "Today", "This week", "Upcoming", "No date"];
+      entries.sort(([a], [b]) => {
+        const ai = order.indexOf(a), bi = order.indexOf(b);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+    } else {
+      entries.sort(([a], [b]) => a.localeCompare(b));
+    }
+    return entries.map(([key, tasks]) => ({ key, tasks }));
+  }, [filtered, groupBy, activeStatus, search]);
 
   const counts = useMemo(() => {
     const props = activeProperty === "All properties" ? tasks : tasks.filter((t) => t.property === activeProperty);
@@ -640,11 +684,19 @@ export default function App() {
         />
 
         <div className="overflow-y-auto scrollbar-hide" style={{ height: `calc(100% - ${(syncError || !isOnline || pendingCount > 0) ? 312 : 282}px)`, background: "#FAF6EE" }}>
-          <div className="px-4 py-3 flex items-center justify-between">
-            <p className="text-xs" style={{ color: "#8A7A5C" }}>
-              {filtered.length} {filtered.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
-            </p>
-          </div>
+          {isArchivedView ? (
+            <div className="px-4 py-2.5">
+              <p className="text-xs" style={{ color: "#8A7A5C" }}>
+                {filtered.length} {filtered.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
+              </p>
+            </div>
+          ) : (
+            <SortGroupBar
+              groupBy={groupBy} setGroupBy={setGroupBy}
+              sortBy={sortBy} setSortBy={setSortBy}
+              count={filtered.length} lastSync={lastSync}
+            />
+          )}
 
           {filtered.length === 0 ? (
             <div className="px-6 py-16 text-center">
@@ -661,8 +713,14 @@ export default function App() {
               onTaskClick={setOpenTask}
               onAssigneeClick={(name) => setSearch(name)}
             />
+          ) : groupedTasks ? (
+            <GroupedListView
+              groups={groupedTasks}
+              onTaskClick={setOpenTask}
+              onToggle={(t) => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })}
+            />
           ) : (
-            <div className="px-4 pb-32">
+            <div className="px-4 pb-32 pt-1">
               <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
                 {filtered.map((t) => (
                   <TaskRow key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
@@ -709,6 +767,171 @@ export default function App() {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------- Sort + group controls bar ----------
+const GROUP_OPTS = [
+  { value: "none", label: "No grouping" },
+  { value: "property", label: "Property" },
+  { value: "assignee", label: "Person" },
+  { value: "due", label: "Due date" },
+];
+const SORT_OPTS = [
+  { value: "overdue", label: "Overdue first" },
+  { value: "date", label: "Soonest first" },
+];
+
+function SortGroupBar({ groupBy, setGroupBy, sortBy, setSortBy, count, lastSync }) {
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const groupLabel = GROUP_OPTS.find((o) => o.value === groupBy)?.label ?? "Group";
+  const sortLabel = SORT_OPTS.find((o) => o.value === sortBy)?.label ?? "Sort";
+
+  return (
+    <div
+      className="sticky top-0 z-10 px-4 py-2.5 flex items-center justify-between gap-2"
+      style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.05)" }}
+    >
+      <p className="text-xs flex-shrink-0" style={{ color: "#8A7A5C" }}>
+        {count} {count === 1 ? "task" : "tasks"} · {timeAgo(lastSync)}
+      </p>
+      <div className="flex items-center gap-1.5">
+        <div className="relative">
+          {groupOpen && <div className="fixed inset-0 z-10" onClick={() => setGroupOpen(false)} />}
+          <button
+            type="button"
+            onClick={() => { setGroupOpen((v) => !v); setSortOpen(false); }}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all active:scale-95"
+            style={{
+              background: groupBy !== "none" ? "#0F0F0F" : "white",
+              color: groupBy !== "none" ? "white" : "#0F0F0F",
+              border: "1px solid rgba(0,0,0,0.08)",
+            }}
+          >
+            <ListFilter size={11} />
+            {groupBy === "none" ? "Group" : groupLabel}
+          </button>
+          {groupOpen && (
+            <div
+              className="absolute right-0 top-full mt-1 rounded-xl overflow-hidden z-20 fade-anim"
+              style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", boxShadow: "0 8px 24px -8px rgba(0,0,0,0.2)", minWidth: "140px" }}
+            >
+              {GROUP_OPTS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => { setGroupBy(o.value); setGroupOpen(false); }}
+                  className="w-full px-3 py-2.5 text-left text-xs flex items-center justify-between"
+                  style={{ color: "#0F0F0F", background: groupBy === o.value ? "#FAF6EE" : "white" }}
+                >
+                  {o.label}
+                  {groupBy === o.value && <Check size={11} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="relative">
+          {sortOpen && <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />}
+          <button
+            type="button"
+            onClick={() => { setSortOpen((v) => !v); setGroupOpen(false); }}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all active:scale-95"
+            style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}
+          >
+            <ArrowUpDown size={11} />
+            {sortLabel}
+          </button>
+          {sortOpen && (
+            <div
+              className="absolute right-0 top-full mt-1 rounded-xl overflow-hidden z-20 fade-anim"
+              style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", boxShadow: "0 8px 24px -8px rgba(0,0,0,0.2)", minWidth: "140px" }}
+            >
+              {SORT_OPTS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => { setSortBy(o.value); setSortOpen(false); }}
+                  className="w-full px-3 py-2.5 text-left text-xs flex items-center justify-between"
+                  style={{ color: "#0F0F0F", background: sortBy === o.value ? "#FAF6EE" : "white" }}
+                >
+                  {o.label}
+                  {sortBy === o.value && <Check size={11} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Grouped list view ----------
+function GroupedListView({ groups, onTaskClick, onToggle }) {
+  const [openGroups, setOpenGroups] = useState(() => new Set(groups.map((g) => g.key)));
+
+  useEffect(() => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      groups.forEach((g) => { if (!next.has(g.key)) next.add(g.key); });
+      return next;
+    });
+  }, [groups]);
+
+  const toggle = (key) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div className="px-4 pb-32 pt-2 space-y-2">
+      {groups.map(({ key, tasks }) => {
+        const isOpen = openGroups.has(key);
+        const isOverdue = key === "Overdue";
+        return (
+          <div key={key}>
+            <button
+              type="button"
+              onClick={() => toggle(key)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all active:scale-[0.98] mb-1"
+              style={{
+                background: isOverdue ? "#FEF2F2" : "white",
+                border: `1px solid ${isOverdue ? "rgba(185,28,28,0.2)" : "rgba(0,0,0,0.06)"}`,
+                color: isOverdue ? "#991B1B" : "#0F0F0F",
+              }}
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <ChevronRight
+                  size={13}
+                  style={{ flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 180ms" }}
+                />
+                {isOverdue && <AlertCircle size={12} style={{ flexShrink: 0 }} />}
+                <span className="truncate">{key}</span>
+              </span>
+              <span
+                className="flex-shrink-0 px-1.5 rounded-full ml-2"
+                style={{ fontSize: "10px", background: isOverdue ? "rgba(185,28,28,0.12)" : "rgba(0,0,0,0.06)" }}
+              >
+                {tasks.length}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="rounded-2xl overflow-hidden mb-1" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+                {tasks.map((t) => (
+                  <TaskRow key={t.id} task={t} onClick={() => onTaskClick(t)} onToggle={() => onToggle(t)} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
