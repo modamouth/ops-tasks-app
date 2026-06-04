@@ -175,17 +175,17 @@ function usePersistedState(key, defaultValue) {
 }
 
 const rowToTask = (row) => ({
-  id: row["Task ID"] || "",
-  title: row["Task Description"] || "",
-  property: row["Property"] || "",
-  category: row["Category"] || "",
-  assignee: row["Assigned To"] || "Unassigned",
-  phone: row["Phone Number"] || "",
+  id: (row["Task ID"] || "").trim(),
+  title: (row["Task Description"] || "").trim(),
+  property: (row["Property"] || "").trim(),
+  category: (row["Category"] || "").trim(),
+  assignee: (row["Assigned To"] || "Unassigned").trim(),
+  phone: (row["Phone Number"] || "").trim(),
   status: STATUS_KEYS.includes(row["Status"]) || row["Status"] === ARCHIVED_STATUS
     ? row["Status"]
     : "Pending",
-  dueDate: row["Due Date"] || "",
-  photoUrl: row["Photo URL"] || "",
+  dueDate: (row["Due Date"] || "").trim(),
+  photoUrl: (row["Photo URL"] || "").trim(),
 });
 
 const nextIdFor = (property, tasks) => {
@@ -406,10 +406,18 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isOnline, pendingQueue.length, flushPendingChanges]);
 
+  // Filter dropdown only shows properties that actually exist in tasks.
+  // Avoids phantom MASTER_PROPERTIES entries matching nothing in the CSV.
   const propertyOptions = useMemo(() => {
     const fromTasks = new Set(tasks.map((t) => t.property).filter(Boolean));
+    return ["All properties", ...Array.from(fromTasks).sort()];
+  }, [tasks]);
+
+  // New-task form gets the full list so users can pick any known property.
+  const newTaskPropertyOptions = useMemo(() => {
+    const fromTasks = new Set(tasks.map((t) => t.property).filter(Boolean));
     const combined = new Set([...MASTER_PROPERTIES, ...fromTasks]);
-    return ["All properties", ...Array.from(combined).sort()];
+    return Array.from(combined).sort();
   }, [tasks]);
 
   const categoryOptions = useMemo(() => {
@@ -748,7 +756,7 @@ export default function App() {
         )}
         {newTaskOpen && (
           <NewTaskSheet
-            propertyOptions={propertyOptions.filter((p) => p !== "All properties")}
+            propertyOptions={newTaskPropertyOptions}
             categoryOptions={categoryOptions}
             team={teamOptions}
             tasks={tasks}
