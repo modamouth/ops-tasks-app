@@ -511,12 +511,16 @@ export default function App() {
   };
 
   const addTask = (data) => {
-    const id = data.id || nextIdFor(data.property, tasks);
-    const t = { id, ...data };
     const createdIso = new Date().toISOString();
-    setTasks((prev) => [t, ...prev]);
-    setCreatedAtMap((prev) => ({ ...prev, [id]: createdIso }));
-    enqueueChange({ action: "create", task: t });
+    let resolvedId = data.id;
+    setTasks((prev) => {
+      const id = data.id || nextIdFor(data.property, prev);
+      resolvedId = id;
+      if (prev.some((t) => t.id === id)) return prev; // guard against duplicate IDs
+      return [{ id, ...data }, ...prev];
+    });
+    setCreatedAtMap((prev) => ({ ...prev, [resolvedId]: createdIso }));
+    enqueueChange({ action: "create", task: { id: resolvedId, ...data } });
   };
 
   const refresh = async () => {
@@ -841,8 +845,10 @@ function TaskRow({ task, onClick, onToggle }) {
       style={{ borderBottom: "1px solid rgba(0,0,0,0.05)", opacity: faded ? 0.5 : 1 }}
     >
       <button
+        type="button"
         onClick={(e) => { e.stopPropagation(); onToggle(); }}
-        className="flex-shrink-0 transition-transform active:scale-90"
+        onPointerDown={(e) => e.stopPropagation()}
+        className="flex-shrink-0 p-1.5 -m-1.5 transition-transform active:scale-90"
       >
         {done
           ? <CheckCircle2 size={16} style={{ color: "#15803D" }} />
