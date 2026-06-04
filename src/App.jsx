@@ -658,10 +658,12 @@ export default function App() {
               onAssigneeClick={(name) => setSearch(name)}
             />
           ) : (
-            <div className="px-4 pb-32 space-y-2">
-              {filtered.map((t) => (
-                <TaskCard key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} onAssigneeClick={(name) => setSearch(name)} />
-              ))}
+            <div className="px-4 pb-32">
+              <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+                {filtered.map((t) => (
+                  <TaskRow key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -770,9 +772,9 @@ function ArchivedListView({ tasks, archivedAtMap, onTaskClick, onAssigneeClick }
               </span>
             </button>
             {isOpen && (
-              <div className="space-y-2 mb-3">
+              <div className="rounded-2xl overflow-hidden mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
                 {bucket.tasks.map((t) => (
-                  <TaskCard key={t.id} task={t} onClick={() => onTaskClick(t)} onToggle={() => {}} onAssigneeClick={onAssigneeClick} />
+                  <TaskRow key={t.id} task={t} onClick={() => onTaskClick(t)} onToggle={() => {}} />
                 ))}
               </div>
             )}
@@ -823,62 +825,55 @@ function SyncBanner({ isOnline, flushing, pendingCount, syncError }) {
   return null;
 }
 
-// ---------- Task card ----------
-function TaskCard({ task, onClick, onToggle, onAssigneeClick }) {
+// ---------- Compact task row ----------
+function TaskRow({ task, onClick, onToggle }) {
   const due = fmtDue(task.dueDate);
   const isArchived = task.status === ARCHIVED_STATUS;
   const status = isArchived ? ARCHIVED_STYLE : (STATUSES[task.status] || STATUSES.Pending);
   const done = task.status === DONE_STATUS;
-  const photoSrc = driveImageSrc(task.photoUrl) || task.image;
+  const faded = done || isArchived;
+  const dueLabel = due.text.replace(/^(Overdue|Due soon|Tomorrow) · /, "");
 
   return (
-    <div onClick={onClick} className="rounded-2xl p-4 cursor-pointer transition-all active:scale-[0.99]" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)", opacity: (done || isArchived) ? 0.6 : 1 }}>
-      <div className="flex items-start gap-3">
-        <button onClick={(e) => { e.stopPropagation(); onToggle(); }} className="mt-0.5 transition-transform active:scale-90">
-          {done ? <CheckCircle2 size={20} style={{ color: "#15803D" }} /> : <Circle size={20} style={{ color: "#D4C7B0" }} />}
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="px-1.5 py-0.5 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
-            {task.category && <span className="text-xs" style={{ color: "#8A7A5C" }}>{task.category}</span>}
-            {task.recurring && task.recurring !== "none" && <RefreshCw size={11} style={{ color: "#8A7A5C" }} />}
-            {photoSrc && <Camera size={11} style={{ color: "#8A7A5C" }} />}
-          </div>
-          <h3 className="font-display text-base leading-snug" style={{ color: "#0F0F0F", fontWeight: 500, textDecoration: (done || isArchived) ? "line-through" : "none" }}>{task.title}</h3>
-          <div className="flex items-center gap-3 mt-2 text-xs" style={{ color: "#8A7A5C" }}>
-            <span className="flex items-center gap-1 truncate"><MapPin size={11} /><span className="truncate">{task.property}</span></span>
-          </div>
-          <div className="flex items-center justify-between mt-2.5">
-            <button
-              className="flex items-center gap-2 rounded-lg px-1.5 py-0.5 -mx-1.5 transition-all active:scale-95"
-              style={{ background: "transparent" }}
-              onClick={(e) => { e.stopPropagation(); onAssigneeClick && onAssigneeClick(task.assignee); }}
-            >
-              <Avatar name={task.assignee} size={20} />
-              <span className="text-xs font-medium" style={{ color: "#0F0F0F" }}>{task.assignee}</span>
-            </button>
-            <span className="flex items-center gap-1 text-xs font-medium" style={{ color: due.overdue ? "#B91C1C" : due.urgent ? "#C2410C" : "#8A7A5C" }}>
-              <Clock size={11} />{due.text}
-            </span>
-          </div>
-        </div>
-        {photoSrc && (
-          <img
-            src={photoSrc}
-            alt="Task"
-            className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-          />
-        )}
+    <div
+      onClick={onClick}
+      className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors active:bg-black/[0.03]"
+      style={{ borderBottom: "1px solid rgba(0,0,0,0.05)", opacity: faded ? 0.5 : 1 }}
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        className="flex-shrink-0 transition-transform active:scale-90"
+      >
+        {done
+          ? <CheckCircle2 size={16} style={{ color: "#15803D" }} />
+          : <Circle size={16} style={{ color: "#D4C7B0" }} />}
+      </button>
+
+      <span
+        className="flex-shrink-0 rounded font-semibold uppercase"
+        style={{ fontSize: "9px", letterSpacing: "0.06em", padding: "2px 5px", background: status.bg, color: status.color, whiteSpace: "nowrap" }}
+      >
+        {status.label === "In progress" ? "In prog" : status.label}
+      </span>
+
+      <div className="flex-1 min-w-0">
+        <p
+          className="text-sm leading-tight truncate"
+          style={{ color: "#0F0F0F", fontWeight: 500, textDecoration: faded ? "line-through" : "none" }}
+        >
+          {task.title}
+        </p>
+        <p className="text-xs truncate leading-tight mt-0.5" style={{ color: "#8A7A5C" }}>{task.property}</p>
       </div>
-      {due.overdue && !done && !isArchived && (
-        <div className="flex items-center gap-1.5 mt-3 -mx-4 -mb-4 px-4 py-2 rounded-b-2xl" style={{ background: "#FEF2F2", borderTop: "1px solid rgba(185,28,28,0.1)" }}>
-          <AlertCircle size={11} style={{ color: "#B91C1C", flexShrink: 0 }} />
-          <span className="text-xs font-semibold" style={{ color: "#B91C1C" }}>
-            {due.daysOverdue === 0 ? "Overdue today" : due.daysOverdue === 1 ? "1 day overdue" : `${due.daysOverdue} days overdue`}
-          </span>
-        </div>
-      )}
+
+      <Avatar name={task.assignee} size={20} />
+
+      <span
+        className="flex-shrink-0 text-xs font-medium text-right"
+        style={{ color: due.overdue ? "#B91C1C" : due.urgent ? "#C2410C" : "#8A7A5C", minWidth: "38px" }}
+      >
+        {dueLabel}
+      </span>
     </div>
   );
 }
