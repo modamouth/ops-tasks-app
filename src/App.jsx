@@ -807,7 +807,7 @@ function SortGroupBar({ groupBy, setGroupBy, sortBy, setSortBy, count, lastSync 
       </p>
       <div className="flex items-center gap-1.5">
         <div className="relative">
-          {groupOpen && <div className="fixed inset-0 z-10" onClick={() => setGroupOpen(false)} />}
+          {groupOpen && <div className="fixed inset-0 z-30" onClick={() => setGroupOpen(false)} />}
           <button
             type="button"
             onClick={() => { setGroupOpen((v) => !v); setSortOpen(false); }}
@@ -823,7 +823,7 @@ function SortGroupBar({ groupBy, setGroupBy, sortBy, setSortBy, count, lastSync 
           </button>
           {groupOpen && (
             <div
-              className="absolute right-0 top-full mt-1 rounded-xl overflow-hidden z-20 fade-anim"
+              className="absolute right-0 top-full mt-1 rounded-xl overflow-hidden z-40 fade-anim"
               style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", boxShadow: "0 8px 24px -8px rgba(0,0,0,0.2)", minWidth: "140px" }}
             >
               {GROUP_OPTS.map((o) => (
@@ -843,7 +843,7 @@ function SortGroupBar({ groupBy, setGroupBy, sortBy, setSortBy, count, lastSync 
         </div>
 
         <div className="relative">
-          {sortOpen && <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />}
+          {sortOpen && <div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />}
           <button
             type="button"
             onClick={() => { setSortOpen((v) => !v); setGroupOpen(false); }}
@@ -855,7 +855,7 @@ function SortGroupBar({ groupBy, setGroupBy, sortBy, setSortBy, count, lastSync 
           </button>
           {sortOpen && (
             <div
-              className="absolute right-0 top-full mt-1 rounded-xl overflow-hidden z-20 fade-anim"
+              className="absolute right-0 top-full mt-1 rounded-xl overflow-hidden z-40 fade-anim"
               style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", boxShadow: "0 8px 24px -8px rgba(0,0,0,0.2)", minWidth: "140px" }}
             >
               {SORT_OPTS.map((o) => (
@@ -1134,14 +1134,32 @@ function PropertyDropdown({ value, onChange, options }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)", color: "#0F0F0F" }}>
-        <span className="flex items-center gap-2 truncate"><MapPin size={14} style={{ color: "#8A7A5C" }} /><span className="truncate">{value}</span></span>
+      {open && <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+        style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)", color: "#0F0F0F" }}
+      >
+        <span className="flex items-center gap-2 truncate">
+          <MapPin size={14} style={{ color: "#8A7A5C" }} />
+          <span className="truncate">{value}</span>
+        </span>
         <ChevronDown size={14} style={{ color: "#8A7A5C", transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms" }} />
       </button>
       {open && (
-        <div className="absolute top-full mt-2 left-0 right-0 rounded-xl overflow-hidden z-20 fade-anim max-h-72 overflow-y-auto" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 12px 30px -10px rgba(0,0,0,0.2)" }}>
+        <div
+          className="absolute top-full mt-2 left-0 right-0 rounded-xl overflow-hidden z-40 fade-anim max-h-72 overflow-y-auto"
+          style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 12px 30px -10px rgba(0,0,0,0.2)" }}
+        >
           {options.map((p) => (
-            <button key={p} onClick={() => { onChange(p); setOpen(false); }} className="w-full px-3 py-2.5 text-left text-sm flex items-center justify-between" style={{ color: "#0F0F0F", background: value === p ? "#FAF6EE" : "white" }}>
+            <button
+              key={p}
+              type="button"
+              onClick={() => { onChange(p); setOpen(false); }}
+              className="w-full px-3 py-2.5 text-left text-sm flex items-center justify-between"
+              style={{ color: "#0F0F0F", background: value === p ? "#FAF6EE" : "white" }}
+            >
               <span className="truncate">{p}</span>
               {value === p && <Check size={14} style={{ color: "#0F0F0F" }} />}
             </button>
