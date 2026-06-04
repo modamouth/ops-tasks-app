@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
-const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "";
+const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHe-qEY2VB71JlIVsx40UPWQGGMRXmAuJ0-hWKTmkvbrzJJt6jDJv2Evw9au27nX705LEwwPzkjLr8/pub?output=csv";
 const ENV_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
 
 // ---------- CONFIG ----------
