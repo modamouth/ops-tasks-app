@@ -35,10 +35,17 @@ const AVATAR_PALETTE = ["#0F4C5C", "#7C2D12", "#374151", "#5B21B6", "#9F1239", "
 
 // Master property list
 const MASTER_PROPERTIES = [
-  "269 Independence", "44 On Post", "Arandis", "Forum Building",
-  "Katutura", "Keetmans", "Kenya House", "Maerua Lifestyle",
-  "Mediva House", "Mutual Tower", "Ondangwa", "Oshakati",
-  "Oshikango", "Otjivanda", "Rehoboth", "Schuster House",
+  "269 Independence",
+  "44 On Post",
+  "Arandis Convenience Centre",
+  "Forum Building",
+  "Maerua Lifestyle Shopping Centre",
+  "Mutual Tower",
+  "Ondangwa",
+  "Oshikango Shopping Centre",
+  "Otjivanda Shopping Centre",
+  "Rehoboth Shopping Centre",
+  "Windhoek Sanlam Centre",
 ];
 
 const SEED_TASKS = [
