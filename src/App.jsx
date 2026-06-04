@@ -431,43 +431,40 @@ export default function App() {
     return ["Unassigned", ...Array.from(set).sort()];
   }, [tasks]);
 
-  // Step 1: filter by status and search, then sort. Property filter is a separate step below.
-  const filtered = useMemo(() => {
-    return tasks
-      .filter((t) => {
-        if (activeStatus === "all") return t.status !== ARCHIVED_STATUS;
-        return t.status === activeStatus;
-      })
-      .filter((t) => {
-        const q = search.trim().toLowerCase();
-        if (!q) return true;
-        return [t.title, t.property, t.category, t.assignee, t.id]
-          .some((f) => (f || "").toLowerCase().includes(q));
-      })
-      .sort((a, b) => {
-        if (activeStatus === ARCHIVED_STATUS) return 0;
-        const aDone = a.status === DONE_STATUS;
-        const bDone = b.status === DONE_STATUS;
-        if (aDone && !bDone) return 1;
-        if (bDone && !aDone) return -1;
-        const aDate = new Date(a.dueDate || "9999-12-31");
-        const bDate = new Date(b.dueDate || "9999-12-31");
-        if (sortBy === "overdue") {
-          const now = new Date();
-          const aOver = aDate < now;
-          const bOver = bDate < now;
-          if (aOver && !bOver) return -1;
-          if (!aOver && bOver) return 1;
-        }
-        return aDate - bDate;
-      });
-  }, [tasks, activeStatus, search, sortBy]);
+  // Compute inline — no useMemo so there are zero caching/staleness issues.
+  // For ≤300 tasks these array ops take < 1ms and are safe on every render.
+  const _q = search.trim().toLowerCase();
+  const filtered = tasks
+    .filter((t) => {
+      if (activeStatus === "all") return t.status !== ARCHIVED_STATUS;
+      return t.status === activeStatus;
+    })
+    .filter((t) => {
+      if (!_q) return true;
+      return [t.title, t.property, t.category, t.assignee, t.id]
+        .some((f) => (f || "").toLowerCase().includes(_q));
+    })
+    .sort((a, b) => {
+      if (activeStatus === ARCHIVED_STATUS) return 0;
+      const aDone = a.status === DONE_STATUS;
+      const bDone = b.status === DONE_STATUS;
+      if (aDone && !bDone) return 1;
+      if (bDone && !aDone) return -1;
+      const aDate = new Date(a.dueDate || "9999-12-31");
+      const bDate = new Date(b.dueDate || "9999-12-31");
+      if (sortBy === "overdue") {
+        const now = new Date();
+        const aOver = aDate < now;
+        const bOver = bDate < now;
+        if (aOver && !bOver) return -1;
+        if (!aOver && bOver) return 1;
+      }
+      return aDate - bDate;
+    });
 
-  // Step 2: apply property filter as a completely separate step.
-  const visibleTasks = useMemo(() => {
-    if (activeProperty === "All properties") return filtered;
-    return filtered.filter((t) => t.property === activeProperty);
-  }, [filtered, activeProperty]);
+  const visibleTasks = activeProperty === "All properties"
+    ? filtered
+    : filtered.filter((t) => t.property === activeProperty);
 
   const groupedTasks = useMemo(() => {
     if (activeStatus === ARCHIVED_STATUS || groupBy === "none" || search.trim()) return null;
@@ -502,7 +499,8 @@ export default function App() {
       entries.sort(([a], [b]) => a.localeCompare(b));
     }
     return entries.map(([key, tasks]) => ({ key, tasks }));
-  }, [visibleTasks, groupBy, activeStatus, search]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, activeStatus, activeProperty, search, sortBy, groupBy]);
 
   const counts = useMemo(() => {
     const props = activeProperty === "All properties" ? tasks : tasks.filter((t) => t.property === activeProperty);
