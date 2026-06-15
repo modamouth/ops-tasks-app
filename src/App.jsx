@@ -279,10 +279,10 @@ const nextRecurringDue = (recurring, recurringDay, currentDue) => {
   return null;
 };
 
-const downloadPersonPDF = (name, tasks) => {
-  const outstanding = tasks.filter(
-    (t) => t.assignee === name && t.status !== DONE_STATUS && t.status !== ARCHIVED_STATUS
-  );
+const buildAndSavePDF = (name, tasks) => {
+  const outstanding = tasks
+    .filter((t) => t.assignee === name && t.status !== DONE_STATUS && t.status !== ARCHIVED_STATUS)
+    .sort((a, b) => new Date(a.dueDate || "9999-12-31") - new Date(b.dueDate || "9999-12-31"));
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const today = new Date().toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" });
@@ -321,6 +321,15 @@ const downloadPersonPDF = (name, tasks) => {
   });
 
   doc.save(`tasks-${name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`);
+};
+
+const downloadPersonPDF = async (name, csvUrl) => {
+  const res = await fetch(csvUrl);
+  if (!res.ok) throw new Error(`Failed to fetch sheet: HTTP ${res.status}`);
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+  const allTasks = parsed.data.map(rowToTask).filter((t) => t.id);
+  buildAndSavePDF(name, allTasks);
 };
 
 const queueBytes = (queue) => {
@@ -408,6 +417,7 @@ export default function App() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const [lastSync, setLastSync] = usePersistedState("ops.lastSync", new Date().toISOString());
   const [syncError, setSyncError] = useState("");
   const [now, setNow] = useState(new Date());
@@ -755,12 +765,18 @@ export default function App() {
                   Showing all tasks for {matchedName}
                 </span>
                 <button
-                  onClick={() => downloadPersonPDF(matchedName, tasks)}
+                  disabled={pdfDownloading}
+                  onClick={async () => {
+                    setPdfDownloading(true);
+                    try { await downloadPersonPDF(matchedName, csvUrl); }
+                    catch (e) { alert("PDF failed: " + e.message); }
+                    finally { setPdfDownloading(false); }
+                  }}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95"
-                  style={{ background: "#0F4C5C", color: "white" }}
+                  style={{ background: "#0F4C5C", color: "white", opacity: pdfDownloading ? 0.6 : 1 }}
                   title="Download outstanding tasks as PDF"
                 >
-                  <Download size={11} />
+                  {pdfDownloading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
                   PDF
                 </button>
               </div>
