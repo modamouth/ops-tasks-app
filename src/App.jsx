@@ -12,6 +12,7 @@ import autoTable from "jspdf-autotable";
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
 const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHe-qEY2VB71JlIVsx40UPWQGGMRXmAuJ0-hWKTmkvbrzJJt6jDJv2Evw9au27nX705LEwwPzkjLr8/pub?output=csv";
 const ENV_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
+const ENV_APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "";
 
 // ---------- CONFIG ----------
 const STATUSES = {
@@ -400,11 +401,33 @@ export default function App() {
   const [pendingQueue, setPendingQueue] = usePersistedState("ops.pendingChanges", []);
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
+  const [passwordOverride, setPasswordOverride] = usePersistedState("ops.password", "");
   const [groupBy, setGroupBy] = usePersistedState("ops.groupBy", "none");
   const [sortBy, setSortBy] = usePersistedState("ops.sortBy", "overdue");
 
   const csvUrl = ENV_CSV_URL || csvOverride;
   const webhookUrl = ENV_WEBHOOK_URL || webhookOverride;
+  const appPassword = ENV_APP_PASSWORD || passwordOverride;
+
+  const [authed, setAuthed] = useState(() => {
+    if (!appPassword) return true;
+    return localStorage.getItem("ops.auth") === btoa(appPassword);
+  });
+
+  // Re-check auth whenever the configured password changes.
+  useEffect(() => {
+    if (!appPassword) { setAuthed(true); return; }
+    setAuthed(localStorage.getItem("ops.auth") === btoa(appPassword));
+  }, [appPassword]);
+
+  const tryUnlock = (entered) => {
+    if (entered === appPassword) {
+      localStorage.setItem("ops.auth", btoa(appPassword));
+      setAuthed(true);
+      return true;
+    }
+    return false;
+  };
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [flushing, setFlushing] = useState(false);
@@ -708,6 +731,8 @@ export default function App() {
   const pendingCount = pendingQueue.length;
   const isArchivedView = activeStatus === ARCHIVED_STATUS;
 
+  if (!authed) return <LoginScreen onUnlock={tryUnlock} />;
+
   return (
     <div
       className="min-h-screen w-full flex items-center justify-center p-0 sm:p-6"
@@ -877,9 +902,11 @@ export default function App() {
           <SettingsSheet
             envCsvUrl={ENV_CSV_URL}
             envWebhookUrl={ENV_WEBHOOK_URL}
+            envPassword={ENV_APP_PASSWORD}
             csvOverride={csvOverride}
             webhookOverride={webhookOverride}
-            onSave={(c, w) => { setCsvOverride(c); setWebhookOverride(w); setSettingsOpen(false); if (csvUrl) refresh(); }}
+            passwordOverride={passwordOverride}
+            onSave={(c, w, p) => { setCsvOverride(c); setWebhookOverride(w); setPasswordOverride(p); setSettingsOpen(false); if (csvUrl) refresh(); }}
             onClose={() => setSettingsOpen(false)}
           />
         )}
@@ -1817,11 +1844,75 @@ function FieldGroup({ label, children }) {
   );
 }
 
-function SettingsSheet({ envCsvUrl, envWebhookUrl, csvOverride, webhookOverride, onSave, onClose }) {
+function LoginScreen({ onUnlock }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const attempt = () => {
+    if (onUnlock(pw)) {
+      setError(false);
+    } else {
+      setError(true);
+      setPw("");
+      inputRef.current?.focus();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex flex-col items-center justify-center px-8" style={{ background: "#FAF6EE" }}>
+      <div className="w-full max-w-sm flex flex-col items-center">
+        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6" style={{ background: "#0F0F0F" }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
+        <p className="text-xs font-semibold tracking-widest uppercase mb-1" style={{ color: "#8A7A5C" }}>Operations</p>
+        <h1 className="font-display text-2xl font-bold mb-1" style={{ color: "#0F0F0F" }}>Welcome back</h1>
+        <p className="text-sm mb-8 text-center" style={{ color: "#8A7A5C" }}>Enter the password to access the task board</p>
+
+        <div className="w-full rounded-2xl px-4 py-3 mb-3 flex items-center gap-3" style={{ background: "white", border: error ? "1.5px solid #B91C1C" : "1px solid rgba(0,0,0,0.08)" }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={error ? "#B91C1C" : "#8A7A5C"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <input
+            ref={inputRef}
+            type="password"
+            value={pw}
+            onChange={(e) => { setPw(e.target.value); setError(false); }}
+            onKeyDown={(e) => e.key === "Enter" && attempt()}
+            placeholder="Password"
+            className="flex-1 bg-transparent outline-none text-sm font-medium"
+            style={{ color: "#0F0F0F" }}
+          />
+        </div>
+        {error && <p className="text-xs font-semibold mb-3" style={{ color: "#B91C1C" }}>Incorrect password — try again</p>}
+
+        <button
+          onClick={attempt}
+          disabled={!pw}
+          className="w-full py-3 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98]"
+          style={{ background: pw ? "#0F0F0F" : "#E5DFD5", color: pw ? "white" : "#8A7A5C" }}
+        >
+          Unlock
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsSheet({ envCsvUrl, envWebhookUrl, envPassword, csvOverride, webhookOverride, passwordOverride, onSave, onClose }) {
   const [c, setC] = useState(csvOverride);
   const [w, setW] = useState(webhookOverride);
+  const [p, setP] = useState(passwordOverride);
+  const [showPw, setShowPw] = useState(false);
   const csvManaged = !!envCsvUrl;
   const webhookManaged = !!envWebhookUrl;
+  const passwordManaged = !!envPassword;
 
   return (
     <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
@@ -1830,7 +1921,7 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, csvOverride, webhookOverride,
         <div className="px-5 pt-2 pb-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
           <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>Connections</span>
-          <button onClick={() => onSave(c, w)} className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>Save</button>
+          <button onClick={() => onSave(c, w, p)} className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>Save</button>
         </div>
         <div className="px-5 pb-6 overflow-y-auto scrollbar-hide">
           {csvManaged && webhookManaged ? (
@@ -1845,7 +1936,28 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, csvOverride, webhookOverride,
           )}
           <UrlField label="Published CSV URL (read)" value={csvManaged ? "Configured via Vercel" : c} onChange={setC} disabled={csvManaged} />
           <UrlField label="n8n webhook URL (write)" value={webhookManaged ? "Configured via Vercel" : w} onChange={setW} disabled={webhookManaged} />
-          {(csvManaged || webhookManaged) && <p className="text-xs mt-3" style={{ color: "#8A7A5C" }}>To change managed URLs, update environment variables in your Vercel project settings.</p>}
+          {(csvManaged || webhookManaged) && <p className="text-xs mt-3 mb-4" style={{ color: "#8A7A5C" }}>To change managed URLs, update environment variables in your Vercel project settings.</p>}
+          <div className="rounded-xl px-4 py-3 mb-3" style={{ background: passwordManaged ? "#F0EBE0" : "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+            <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>App Password</div>
+            {passwordManaged ? (
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>Configured via Vercel</p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type={showPw ? "text" : "password"}
+                  value={p}
+                  onChange={(e) => setP(e.target.value)}
+                  placeholder="Leave blank to disable login"
+                  className="flex-1 bg-transparent outline-none text-sm"
+                  style={{ color: "#0F0F0F" }}
+                />
+                <button type="button" onClick={() => setShowPw((v) => !v)} className="text-xs" style={{ color: "#8A7A5C" }}>
+                  {showPw ? "Hide" : "Show"}
+                </button>
+              </div>
+            )}
+          </div>
+          {!passwordManaged && <p className="text-xs" style={{ color: "#8A7A5C" }}>Set a password to require login. Leave blank for no login screen.</p>}
         </div>
       </div>
     </div>
