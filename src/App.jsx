@@ -4,8 +4,10 @@ import {
   Search, Plus, MapPin, Clock, X, Check, AlertCircle, Settings,
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
-  Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown,
+  Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
 } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
 const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHe-qEY2VB71JlIVsx40UPWQGGMRXmAuJ0-hWKTmkvbrzJJt6jDJv2Evw9au27nX705LEwwPzkjLr8/pub?output=csv";
@@ -275,6 +277,50 @@ const nextRecurringDue = (recurring, recurringDay, currentDue) => {
     return base.toISOString().slice(0, 10);
   }
   return null;
+};
+
+const downloadPersonPDF = (name, tasks) => {
+  const outstanding = tasks.filter(
+    (t) => t.assignee === name && t.status !== DONE_STATUS && t.status !== ARCHIVED_STATUS
+  );
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const today = new Date().toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" });
+
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Outstanding Tasks — ${name}`, 14, 20);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(120, 110, 90);
+  doc.text(`Generated ${today} · ${outstanding.length} task${outstanding.length !== 1 ? "s" : ""}`, 14, 27);
+  doc.setTextColor(0, 0, 0);
+
+  autoTable(doc, {
+    startY: 33,
+    head: [["ID", "Task", "Property", "Category", "Status", "Due Date"]],
+    body: outstanding.map((t) => [
+      t.id || "",
+      t.title || "",
+      t.property || "",
+      t.category || "",
+      t.status || "",
+      t.dueDate || "",
+    ]),
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [15, 15, 15], textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 20 },
+      1: { cellWidth: 65 },
+      2: { cellWidth: 35 },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 20 },
+      5: { cellWidth: 22 },
+    },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+
+  doc.save(`tasks-${name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`);
 };
 
 const queueBytes = (queue) => {
@@ -700,14 +746,26 @@ export default function App() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks, people, locations..." className="flex-1 bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
             {search && <button onClick={() => setSearch("")}><X size={14} style={{ color: "#8A7A5C" }} /></button>}
           </div>
-          {search.trim() && teamOptions.some((n) => n.toLowerCase() === search.trim().toLowerCase()) && (
-            <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-xl fade-anim" style={{ background: "rgba(15,79,92,0.08)", border: "1px solid rgba(15,79,92,0.15)" }}>
-              <Avatar name={teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase())} size={18} />
-              <span className="text-xs font-medium" style={{ color: "#0F4C5C" }}>
-                Showing all tasks for {teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase())}
-              </span>
-            </div>
-          )}
+          {search.trim() && teamOptions.some((n) => n.toLowerCase() === search.trim().toLowerCase()) && (() => {
+            const matchedName = teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase());
+            return (
+              <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-xl fade-anim" style={{ background: "rgba(15,79,92,0.08)", border: "1px solid rgba(15,79,92,0.15)" }}>
+                <Avatar name={matchedName} size={18} />
+                <span className="text-xs font-medium flex-1" style={{ color: "#0F4C5C" }}>
+                  Showing all tasks for {matchedName}
+                </span>
+                <button
+                  onClick={() => downloadPersonPDF(matchedName, tasks)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95"
+                  style={{ background: "#0F4C5C", color: "white" }}
+                  title="Download outstanding tasks as PDF"
+                >
+                  <Download size={11} />
+                  PDF
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
