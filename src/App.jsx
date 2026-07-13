@@ -621,6 +621,44 @@ const generateChecklistPDF = (form) => {
   return doc;
 };
 
+const BUILDING_CODES = {
+  "269 Independence": "IND",
+  "44 On Post": "ONP",
+  "Arandis Convenience Centre": "ARA",
+  "Forum Building": "FOR",
+  "Katutura Shopping Centre": "KAT",
+  "Keetmanshoop Shopping Centre": "KEE",
+  "Kenya House": "KEN",
+  "Maerua Lifestyle Shopping Centre": "MAE",
+  "Mediva House": "MED",
+  "Mutual Tower": "MUT",
+  "Ondangwa": "OND",
+  "Oshakati Shopping Centre": "OSA",
+  "Oshikango Shopping Centre": "OSK",
+  "Otjivanda Shopping Centre": "OTJ",
+  "Rehoboth Shopping Centre": "REH",
+  "Schuster House": "SCH",
+  "Windhoek Sanlam Centre": "WSC",
+};
+
+const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA" };
+
+const generateIncidentRef = (building, checklistId) => {
+  const code = BUILDING_CODES[building];
+  if (!code) return "";
+  const typeCode = CHECKLIST_TYPE_CODES[checklistId] || "CHK";
+  const year = new Date().getFullYear();
+  try {
+    const saved = JSON.parse(localStorage.getItem("ops.checklistSubmissions") || "[]");
+    const count = saved.filter(
+      (s) => s.building === building && s.checklistId === checklistId && new Date(s.submittedAt).getFullYear() === year
+    ).length;
+    return `${code}-${typeCode}-${year}-${String(count + 1).padStart(3, "0")}`;
+  } catch {
+    return `${code}-${typeCode}-${year}-001`;
+  }
+};
+
 const queueBytes = (queue) => {
   try {
     return new Blob([JSON.stringify(queue)]).size;
@@ -2548,6 +2586,15 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
   const toggle = (key) => setForm((f) => ({ ...f, [key]: !f[key] }));
 
+  // Auto-generate incident reference when building is chosen
+  useEffect(() => {
+    if (form.building) {
+      set("incidentRef", generateIncidentRef(form.building, "lift-rca"));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
   const addCorrRow = () => setForm((f) => ({ ...f, correctiveActions: [...f.correctiveActions, { action: "", dateCompleted: "", technician: "" }] }));
   const removeCorrRow = (i) => setForm((f) => ({ ...f, correctiveActions: f.correctiveActions.filter((_, idx) => idx !== i) }));
   const updateCorrRow = (i, field, val) => setForm((f) => ({ ...f, correctiveActions: f.correctiveActions.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
@@ -2664,7 +2711,14 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
 
               {/* Lift Details */}
               <SectionHeader title="Lift Details" />
-              <InputRow label="Building / Location" value={form.building} onChange={(v) => set("building", v)} />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Location</div>
+                <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                  className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                  <option value="">Select building…</option>
+                  {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
               <InputRow label="Lift Identification (A/B/C/D…)" value={form.liftId} onChange={(v) => set("liftId", v)} />
               <div className="flex gap-2">
                 <div className="flex-1">
@@ -2685,7 +2739,21 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
               <InputRow label="Time Lift Restored" value={form.timeLiftRestored} onChange={(v) => set("timeLiftRestored", v)} type="time" />
               <InputRow label="Service Provider" value={form.serviceProvider} onChange={(v) => set("serviceProvider", v)} />
               <InputRow label="Technician Name" value={form.technicianName} onChange={(v) => set("technicianName", v)} />
-              <InputRow label="Incident Reference No." value={form.incidentRef} onChange={(v) => set("incidentRef", v)} />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Incident Reference No.</div>
+                  {form.building && BUILDING_CODES[form.building] && (
+                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                  )}
+                </div>
+                <input
+                  value={form.incidentRef}
+                  onChange={(e) => set("incidentRef", e.target.value)}
+                  placeholder={form.building ? "Select a building to generate" : "Or enter manually…"}
+                  className="w-full bg-transparent outline-none text-sm font-medium"
+                  style={{ color: "#0F0F0F" }}
+                />
+              </div>
 
               {/* Section 1: RCA */}
               <SectionHeader number="1" title="Root Cause Analysis (RCA)" />
