@@ -2300,6 +2300,8 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, envPassword, csvOverride, web
 function ChecklistDashboard({ webhookUrl, onClose }) {
   const [activeId, setActiveId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [tab, setTab] = useState("checklists");
+  const [submissions, setSubmissions] = usePersistedState("ops.checklistSubmissions", []);
 
   const copyLink = (id) => {
     const url = `${window.location.origin}${window.location.pathname}?checklist=${id}`;
@@ -2309,6 +2311,34 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
     });
   };
 
+  const saveSubmission = (entry, formData, pdfFileName) => {
+    const record = {
+      id: uuid(),
+      checklistId: entry.id,
+      checklistName: entry.name,
+      submittedAt: new Date().toISOString(),
+      recipientEmail: formData.recipientEmail,
+      building: formData.building,
+      liftId: formData.liftId,
+      incidentRef: formData.incidentRef,
+      dateOfFailure: formData.dateOfFailure,
+      pdfFileName,
+      formData,
+    };
+    setSubmissions((prev) => [record, ...prev]);
+  };
+
+  const redownload = (sub) => {
+    const entry = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklistId);
+    if (!entry) return;
+    generateChecklistPDF(sub.formData).save(sub.pdfFileName);
+  };
+
+  const fmtSubmittedAt = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  };
+
   if (activeId) {
     const entry = CHECKLIST_REGISTRY.find((c) => c.id === activeId);
     return (
@@ -2316,6 +2346,7 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
         webhookUrl={webhookUrl}
         onClose={() => setActiveId(null)}
         name={entry.name}
+        onSave={(formData, pdfFileName) => saveSubmission(entry, formData, pdfFileName)}
       />
     );
   }
@@ -2333,46 +2364,96 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
           <div className="w-10" />
         </div>
 
-        {/* List */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-4 pb-8">
-          <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>
-            Fill in a checklist internally, or share a link with an external party so they can complete it without accessing the task board.
-          </p>
-          {CHECKLIST_REGISTRY.map((entry) => (
-            <div key={entry.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
-              <div className="flex items-start justify-between gap-3 mb-1">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm truncate" style={{ color: "#0F0F0F" }}>{entry.name}</p>
-                  <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "#8A7A5C" }}>{entry.description}</p>
-                </div>
-                <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
-                  {entry.category}
-                </span>
-              </div>
-              <div className="flex gap-2 mt-3">
-                <button
-                  onClick={() => setActiveId(entry.id)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                  style={{ background: "#0F0F0F", color: "white" }}
-                >
-                  <ClipboardList size={13} /> Fill In
-                </button>
-                <button
-                  onClick={() => copyLink(entry.id)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                  style={{
-                    background: copiedId === entry.id ? "rgba(21,128,61,0.08)" : "#F0EBE0",
-                    color: copiedId === entry.id ? "#15803D" : "#3F3A2E",
-                    border: copiedId === entry.id ? "1px solid rgba(21,128,61,0.2)" : "1px solid transparent",
-                  }}
-                >
-                  {copiedId === entry.id ? <Check size={13} /> : <Download size={13} />}
-                  {copiedId === entry.id ? "Link copied!" : "Share link"}
-                </button>
-              </div>
-            </div>
+        {/* Tabs */}
+        <div className="flex px-4 pt-3 pb-1 gap-2">
+          {[["checklists", "Checklists"], ["submissions", `Submissions${submissions.length ? ` (${submissions.length})` : ""}`]].map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
+              style={{ background: tab === key ? "#0F0F0F" : "white", color: tab === key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
+              {label}
+            </button>
           ))}
         </div>
+
+        {tab === "checklists" ? (
+          <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+            <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>
+              Fill in a checklist internally, or share a link with an external party so they can complete it without accessing the task board.
+            </p>
+            {CHECKLIST_REGISTRY.map((entry) => (
+              <div key={entry.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-start justify-between gap-3 mb-1">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate" style={{ color: "#0F0F0F" }}>{entry.name}</p>
+                    <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "#8A7A5C" }}>{entry.description}</p>
+                  </div>
+                  <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+                    {entry.category}
+                  </span>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => setActiveId(entry.id)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                    style={{ background: "#0F0F0F", color: "white" }}>
+                    <ClipboardList size={13} /> Fill In
+                  </button>
+                  <button onClick={() => copyLink(entry.id)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                    style={{
+                      background: copiedId === entry.id ? "rgba(21,128,61,0.08)" : "#F0EBE0",
+                      color: copiedId === entry.id ? "#15803D" : "#3F3A2E",
+                      border: copiedId === entry.id ? "1px solid rgba(21,128,61,0.2)" : "1px solid transparent",
+                    }}>
+                    {copiedId === entry.id ? <Check size={13} /> : <Download size={13} />}
+                    {copiedId === entry.id ? "Link copied!" : "Share link"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+            {submissions.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                  <ClipboardList size={20} style={{ color: "#8A7A5C" }} />
+                </div>
+                <p className="font-display text-base mb-1" style={{ color: "#0F0F0F" }}>No submissions yet</p>
+                <p className="text-xs" style={{ color: "#8A7A5C" }}>Submitted forms will appear here.</p>
+              </div>
+            ) : (
+              submissions.map((sub) => (
+                <div key={sub.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm" style={{ color: "#0F0F0F" }}>
+                        {sub.building || "—"}{sub.liftId ? ` · ${sub.liftId}` : ""}
+                      </p>
+                      {sub.incidentRef && (
+                        <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Ref: {sub.incidentRef}</p>
+                      )}
+                    </div>
+                    <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+                      {sub.checklistName?.split(" ")[0]}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: "#8A7A5C" }}>
+                    {sub.dateOfFailure && <span>Failure: {sub.dateOfFailure}</span>}
+                    <span>Submitted: {fmtSubmittedAt(sub.submittedAt)}</span>
+                  </div>
+                  {sub.recipientEmail && (
+                    <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.recipientEmail}</p>
+                  )}
+                  <button onClick={() => redownload(sub)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                    style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+                    <Download size={13} /> Download PDF
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2458,7 +2539,7 @@ const CHECKLIST_INITIAL = {
   recipientEmail: "",
 };
 
-function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RCA Checklist" }) {
+function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RCA Checklist", onSave }) {
   const [form, setForm] = useState(CHECKLIST_INITIAL);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -2512,6 +2593,7 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
         doc.save(pdfFileName);
       }
       setSubmitted(true);
+      if (onSave) onSave(form, pdfFileName);
     } catch (e) {
       setSubmitError(e.message || "Submission failed — please try again.");
     } finally {
