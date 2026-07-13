@@ -2328,6 +2328,63 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
   );
 }
 
+// ---------- Checklist form helpers (module-level so they never remount on re-render) ----------
+function SectionHeader({ number, title }) {
+  return (
+    <div className="mt-5 mb-2 px-3 py-2 rounded-xl text-sm font-semibold" style={{ background: "#0F0F0F", color: "white" }}>
+      {number ? `${number}. ` : ""}{title}
+    </div>
+  );
+}
+
+function CheckRow({ label, checked, onChange }) {
+  return (
+    <button type="button" onClick={() => onChange(!checked)}
+      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
+      style={{ background: checked ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${checked ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
+      <div className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
+        style={{ background: checked ? "#0F4C5C" : "transparent", border: checked ? "none" : "1.5px solid #D1C9B8" }}>
+        {checked && <Check size={10} style={{ color: "white" }} />}
+      </div>
+      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
+    </button>
+  );
+}
+
+function RadioRow({ label, selected, onSelect }) {
+  return (
+    <button type="button" onClick={onSelect}
+      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
+      style={{ background: selected ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${selected ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
+      <div className="w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center"
+        style={{ border: selected ? "none" : "1.5px solid #D1C9B8", background: selected ? "#0F4C5C" : "transparent" }}>
+        {selected && <div className="w-2 h-2 rounded-full bg-white" />}
+      </div>
+      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
+    </button>
+  );
+}
+
+function InputRow({ label, value, onChange, type = "text", placeholder = "" }) {
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+    </div>
+  );
+}
+
+function TextareaRow({ label, value, onChange, placeholder = "", rows = 3 }) {
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+        className="w-full bg-transparent outline-none text-sm resize-none" style={{ color: "#0F0F0F" }} />
+    </div>
+  );
+}
+
 const CHECKLIST_INITIAL = {
   building: "", liftId: "", dateOfFailure: "", timeOfFailure: "",
   timeReported: "", timeTechArrived: "", timeLiftRestored: "",
@@ -2412,70 +2469,11 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
     }
   };
 
-  const SectionHeader = ({ number, title }) => (
-    <div className="mt-5 mb-2 px-3 py-2 rounded-xl text-sm font-semibold" style={{ background: "#0F0F0F", color: "white" }}>
-      {number ? `${number}. ` : ""}{title}
-    </div>
-  );
-
-  const CheckRow = ({ label, checked, onChange }) => (
-    <button type="button" onClick={() => onChange(!checked)}
-      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
-      style={{ background: checked ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${checked ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
-      <div className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
-        style={{ background: checked ? "#0F4C5C" : "transparent", border: checked ? "none" : "1.5px solid #D1C9B8" }}>
-        {checked && <Check size={10} style={{ color: "white" }} />}
-      </div>
-      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
-    </button>
-  );
-
-  const RadioRow = ({ label, selected, onSelect }) => (
-    <button type="button" onClick={onSelect}
-      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
-      style={{ background: selected ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${selected ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
-      <div className="w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center"
-        style={{ border: selected ? "none" : "1.5px solid #D1C9B8", background: selected ? "#0F4C5C" : "transparent" }}>
-        {selected && <div className="w-2 h-2 rounded-full bg-white" />}
-      </div>
-      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
-    </button>
-  );
-
-  const InputRow = ({ label, value, onChange, type = "text", placeholder = "" }) => (
-    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
-      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
-    </div>
-  );
-
-  const TextareaRow = ({ label, value, onChange, placeholder = "", rows = 3 }) => (
-    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
-      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows}
-        className="w-full bg-transparent outline-none text-sm resize-none" style={{ color: "#0F0F0F" }} />
-    </div>
-  );
-
   const resetForm = () => { setForm(CHECKLIST_INITIAL); setSubmitted(false); setSubmitError(""); };
 
-  const Outer = standalone
-    ? ({ children }) => (
-        <div className="min-h-screen flex flex-col" style={{ background: "#FAF6EE" }}>
-          {children}
-        </div>
-      )
-    : ({ children }) => (
-        <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="absolute inset-0 flex flex-col sheet-anim" style={{ background: "#FAF6EE" }}>
-            {children}
-          </div>
-        </div>
-      );
-
-  return (
-    <Outer>
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  const content = (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
         {/* Header */}
         <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
           {standalone ? (
@@ -2802,7 +2800,14 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
             </>
           )}
         </div>
-    </Outer>
+    </div>
+  );
+
+  if (standalone) return content;
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      {content}
+    </div>
   );
 }
 
