@@ -357,12 +357,62 @@ const generateChecklistPDF = (form) => {
     y += 10;
   };
 
+  // Draw a checkbox (square) — filled teal when checked, light grey border when not
   const cb = (checked, label, indent = 0) => {
-    checkY(6);
+    checkY(7);
+    const sz = 3.2;
+    const bx = m + indent;
+    const by = y - sz + 0.5;
+    doc.setLineWidth(0.25);
+    if (checked) {
+      doc.setFillColor(15, 76, 92);
+      doc.setDrawColor(15, 76, 92);
+      doc.rect(bx, by, sz, sz, "FD");
+      doc.setDrawColor(255, 255, 255);
+      doc.setLineWidth(0.55);
+      doc.line(bx + 0.55, by + sz * 0.52, bx + sz * 0.42, by + sz * 0.84);
+      doc.line(bx + sz * 0.42, by + sz * 0.84, bx + sz - 0.45, by + 0.55);
+    } else {
+      doc.setFillColor(250, 250, 250);
+      doc.setDrawColor(180, 180, 180);
+      doc.rect(bx, by, sz, sz, "FD");
+    }
+    doc.setLineWidth(0.2);
+    doc.setDrawColor(0, 0, 0);
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    doc.text((checked ? "☑" : "☐") + " " + label, m + indent, y);
-    y += 5.5;
+    doc.setTextColor(0, 0, 0);
+    const lines = doc.splitTextToSize(label, cW - indent - sz - 2.5);
+    doc.text(lines, bx + sz + 2, y);
+    y += Math.max(5.5, lines.length * 5);
+  };
+
+  // Draw a radio button (circle) — filled when selected
+  const rb = (selected, label, indent = 0) => {
+    checkY(7);
+    const r = 1.7;
+    const cx = m + indent + r;
+    const cy = y - r + 0.4;
+    doc.setLineWidth(0.25);
+    if (selected) {
+      doc.setFillColor(15, 76, 92);
+      doc.setDrawColor(15, 76, 92);
+      doc.circle(cx, cy, r, "FD");
+      doc.setFillColor(255, 255, 255);
+      doc.circle(cx, cy, r * 0.42, "F");
+    } else {
+      doc.setFillColor(250, 250, 250);
+      doc.setDrawColor(180, 180, 180);
+      doc.circle(cx, cy, r, "FD");
+    }
+    doc.setLineWidth(0.2);
+    doc.setDrawColor(0, 0, 0);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0, 0, 0);
+    const lines = doc.splitTextToSize(label, cW - indent - r * 2 - 2.5);
+    doc.text(lines, m + indent + r * 2 + 1.5, y);
+    y += Math.max(5.5, lines.length * 5);
   };
 
   const bodyText = (text, indent = 0) => {
@@ -433,7 +483,7 @@ const generateChecklistPDF = (form) => {
     ["safety", "Safety Circuit Fault"],
     ["external", "External Cause (Power Surge / Electrical Disturbance / Other)"],
     ["other", "Other: " + (form.failureCategoryOther || "")],
-  ].forEach(([key, label]) => cb(form.failureCategory === key, label, 3));
+  ].forEach(([key, label]) => rb(form.failureCategory === key, label, 3));
   y += 2;
   boldLabel("Description of Failure:");
   bodyText(form.failureDescription, 3);
@@ -536,13 +586,13 @@ const generateChecklistPDF = (form) => {
   // Section 7
   sectionTitle("7. Final Verification & Sign-Off");
   boldLabel("Lift Operational Status:");
-  cb(form.operationalStatus === "fully", "Fully Operational", 3);
-  cb(form.operationalStatus === "monitoring", "Operational with Monitoring Required", 3);
-  cb(form.operationalStatus === "outofservice", "Out of Service", 3);
+  rb(form.operationalStatus === "fully", "Fully Operational", 3);
+  rb(form.operationalStatus === "monitoring", "Operational with Monitoring Required", 3);
+  rb(form.operationalStatus === "outofservice", "Out of Service", 3);
   y += 2;
   boldLabel("Final Testing Completed:");
-  cb(form.finalTestingCompleted === true, "Yes", 3);
-  cb(form.finalTestingCompleted === false, "No", 3);
+  rb(form.finalTestingCompleted === true, "Yes", 3);
+  rb(form.finalTestingCompleted === false, "No", 3);
   y += 2;
   boldLabel("Monitoring Period Required:");
   bodyText(form.monitoringPeriod, 3);
@@ -562,8 +612,8 @@ const generateChecklistPDF = (form) => {
   y = doc.lastAutoTable.finalY + 4;
 
   boldLabel("Landlord Notification Completed:");
-  cb(form.landlordNotified === true, "Yes", 3);
-  cb(form.landlordNotified === false, "No", 3);
+  rb(form.landlordNotified === true, "Yes", 3);
+  rb(form.landlordNotified === false, "No", 3);
   y += 2;
   boldLabel("Incident Closed Date:");
   bodyText(form.incidentClosedDate, 3);
