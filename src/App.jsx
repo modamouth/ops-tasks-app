@@ -5,6 +5,7 @@ import {
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
   Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
+  ClipboardList, Send,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -333,6 +334,243 @@ const downloadPersonPDF = async (name, csvUrl) => {
   buildAndSavePDF(name, allTasks);
 };
 
+const generateChecklistPDF = (form) => {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const m = 15;
+  const cW = pageW - m * 2;
+  let y = 20;
+
+  const checkY = (needed = 12) => {
+    if (y + needed > 275) { doc.addPage(); y = 18; }
+  };
+
+  const sectionTitle = (title) => {
+    checkY(14);
+    doc.setFillColor(15, 15, 15);
+    doc.rect(m, y, cW, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, m + 3, y + 5);
+    doc.setTextColor(0, 0, 0);
+    y += 10;
+  };
+
+  const cb = (checked, label, indent = 0) => {
+    checkY(6);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text((checked ? "☑" : "☐") + " " + label, m + indent, y);
+    y += 5.5;
+  };
+
+  const bodyText = (text, indent = 0) => {
+    if (!text) { checkY(6); doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.text("—", m + indent, y); y += 6; return; }
+    const lines = doc.splitTextToSize(text, cW - indent);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    lines.forEach((line) => { checkY(6); doc.text(line, m + indent, y); y += 5; });
+  };
+
+  const boldLabel = (label) => {
+    checkY(8);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(label, m, y);
+    y += 5;
+  };
+
+  // Title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Lift Breakdown / Maintenance Incident Report", m, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text("RCA & Corrective Actions Checklist", m, y);
+  y += 4;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(m, y, m + cW, y);
+  y += 6;
+
+  // Lift Details
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Lift Details", ""]],
+    body: [
+      ["Building / Location", form.building || "—"],
+      ["Lift Identification", form.liftId || "—"],
+      ["Date of Failure", form.dateOfFailure || "—"],
+      ["Time of Failure", form.timeOfFailure || "—"],
+      ["Time Reported", form.timeReported || "—"],
+      ["Time Technician Arrived", form.timeTechArrived || "—"],
+      ["Time Lift Restored", form.timeLiftRestored || "—"],
+      ["Service Provider", form.serviceProvider || "—"],
+      ["Technician Name", form.technicianName || "—"],
+      ["Incident Reference No.", form.incidentRef || "—"],
+    ],
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 70 } },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Section 1
+  sectionTitle("1. Root Cause Analysis (RCA)");
+  cb(form.rcaCompleted, "Detailed RCA completed and attached");
+  y += 2;
+  boldLabel("Actual Cause of Failure:");
+  bodyText(form.actualCause, 3);
+  y += 2;
+  boldLabel("Failure Category:");
+  [
+    ["electrical", "Electrical Fault"],
+    ["mechanical", "Mechanical Fault"],
+    ["control", "Control System Fault"],
+    ["door", "Door System Fault"],
+    ["safety", "Safety Circuit Fault"],
+    ["external", "External Cause (Power Surge / Electrical Disturbance / Other)"],
+    ["other", "Other: " + (form.failureCategoryOther || "")],
+  ].forEach(([key, label]) => cb(form.failureCategory === key, label, 3));
+  y += 2;
+  boldLabel("Description of Failure:");
+  bodyText(form.failureDescription, 3);
+  y += 4;
+
+  // Section 2
+  sectionTitle("2. Corrective Actions Undertaken");
+  cb(form.correctiveActionsCompleted, "Corrective actions completed and documented");
+  y += 2;
+  const corrRows = (form.correctiveActions || []).filter((r) => r.action || r.dateCompleted || r.technician);
+  if (corrRows.length) {
+    autoTable(doc, {
+      startY: y, margin: { left: m, right: m },
+      head: [["Action", "Date Completed", "Technician"]],
+      body: corrRows.map((r) => [r.action || "", r.dateCompleted || "", r.technician || ""]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [80, 80, 80], textColor: [255, 255, 255] },
+      columnStyles: { 0: { cellWidth: 90 }, 1: { cellWidth: 35 } },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  } else {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+    doc.text("No corrective actions recorded.", m + 3, y); y += 8;
+  }
+
+  // Section 3
+  sectionTitle("3. Components Repaired / Adjusted / Tested / Replaced");
+  const compRows = (form.components || []).filter((r) => r.component || r.actionTaken || r.partNumber);
+  if (compRows.length) {
+    autoTable(doc, {
+      startY: y, margin: { left: m, right: m },
+      head: [["Component", "Action Taken", "Part Number", "Date Completed"]],
+      body: compRows.map((r) => [r.component || "", r.actionTaken || "", r.partNumber || "", r.dateCompleted || ""]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [80, 80, 80], textColor: [255, 255, 255] },
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  } else {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+    doc.text("No components recorded.", m + 3, y); y += 6;
+  }
+  cb(form.componentsRecorded, "All replaced components recorded");
+  cb(form.testingCompleted, "Testing completed after repairs");
+  cb(form.safetyChecksCompleted, "Lift safety checks completed");
+  y += 4;
+
+  // Section 4
+  sectionTitle("4. Temporary Measures Implemented");
+  cb(form.tempMeasuresImplemented, "Temporary measures implemented to restore service");
+  y += 2;
+  boldLabel("Details of Temporary Measures:");
+  bodyText(form.tempMeasuresDetails, 3);
+  y += 2;
+  checkY(8);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+  doc.text("Duration: From", m, y);
+  doc.setFont("helvetica", "normal");
+  doc.text((form.tempMeasuresFrom || "—") + "   To:  " + (form.tempMeasuresTo || "—"), m + 32, y);
+  y += 6;
+  cb(form.tempMeasureRemoved, "Temporary measure removed after permanent repair");
+  cb(form.tempMeasureStillActive, "Temporary measure still active");
+  y += 4;
+
+  // Section 5
+  sectionTitle("5. Outstanding Remedial Actions");
+  const outRows = (form.outstandingActions || []).filter((r) => r.action || r.responsiblePerson || r.dueDate || r.status);
+  if (outRows.length) {
+    autoTable(doc, {
+      startY: y, margin: { left: m, right: m },
+      head: [["Outstanding Action", "Responsible Person", "Due Date", "Status"]],
+      body: outRows.map((r) => [r.action || "", r.responsiblePerson || "", r.dueDate || "", r.status || ""]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [80, 80, 80], textColor: [255, 255, 255] },
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  } else {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+    doc.text("No outstanding actions recorded.", m + 3, y); y += 6;
+  }
+  cb(form.noOutstandingActions, "No outstanding actions");
+  cb(form.outstandingCommunicated, "Outstanding actions communicated to Facilities Management");
+  y += 4;
+
+  // Section 6
+  sectionTitle("6. Residual Operational / Reliability / Safety Risks");
+  boldLabel("Remaining Risks Identified:");
+  cb(form.noResidualRisks, "No residual risks identified", 3);
+  cb(form.operationalRisk, "Operational Risk", 3);
+  cb(form.reliabilityRisk, "Reliability Risk", 3);
+  cb(form.safetyRisk, "Safety Risk", 3);
+  cb(form.complianceRisk, "Compliance Risk", 3);
+  y += 2;
+  boldLabel("Risk Details:");
+  bodyText(form.riskDetails, 3);
+  y += 2;
+  boldLabel("Recommended Mitigation Measures:");
+  bodyText(form.mitigationMeasures, 3);
+  y += 4;
+
+  // Section 7
+  sectionTitle("7. Final Verification & Sign-Off");
+  boldLabel("Lift Operational Status:");
+  cb(form.operationalStatus === "fully", "Fully Operational", 3);
+  cb(form.operationalStatus === "monitoring", "Operational with Monitoring Required", 3);
+  cb(form.operationalStatus === "outofservice", "Out of Service", 3);
+  y += 2;
+  boldLabel("Final Testing Completed:");
+  cb(form.finalTestingCompleted === true, "Yes", 3);
+  cb(form.finalTestingCompleted === false, "No", 3);
+  y += 2;
+  boldLabel("Monitoring Period Required:");
+  bodyText(form.monitoringPeriod, 3);
+  y += 4;
+
+  checkY(32);
+  autoTable(doc, {
+    startY: y, margin: { left: m, right: m },
+    body: [
+      ["Service Provider Confirmation", "", "Facilities Management Verification", ""],
+      ["Name:", form.serviceProviderName || "", "Name:", form.fmName || ""],
+      ["Date:", form.serviceProviderDate || "", "Date:", form.fmDate || ""],
+    ],
+    styles: { fontSize: 9, cellPadding: 3 },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 55 }, 2: { fontStyle: "bold", cellWidth: 55 } },
+  });
+  y = doc.lastAutoTable.finalY + 4;
+
+  boldLabel("Landlord Notification Completed:");
+  cb(form.landlordNotified === true, "Yes", 3);
+  cb(form.landlordNotified === false, "No", 3);
+  y += 2;
+  boldLabel("Incident Closed Date:");
+  bodyText(form.incidentClosedDate, 3);
+
+  return doc;
+};
+
 const queueBytes = (queue) => {
   try {
     return new Blob([JSON.stringify(queue)]).size;
@@ -381,8 +619,43 @@ const bucketByArchivedMonth = (tasks, archivedAtMap) => {
   });
 };
 
+const CHECKLIST_ID = new URLSearchParams(window.location.search).get("checklist");
+
+// Registry — add future checklists here
+const CHECKLIST_REGISTRY = [
+  {
+    id: "lift-rca",
+    name: "Lift Breakdown / Maintenance",
+    description: "Root Cause Analysis & Corrective Actions for lift failure incidents",
+    category: "Mechanical",
+    FormComponent: (props) => <LiftRCASheet {...props} />,
+  },
+];
+
 // ---------- Main ----------
 export default function App() {
+  // Standalone public checklist — no auth, no task board
+  if (CHECKLIST_ID) {
+    const entry = CHECKLIST_REGISTRY.find((c) => c.id === CHECKLIST_ID);
+    return (
+      <div className="min-h-screen w-full" style={{ background: "#FAF6EE" }}>
+        <style>{`
+          .font-display { font-family: 'Fraunces', Georgia, serif; font-optical-sizing: auto; }
+          .scrollbar-hide::-webkit-scrollbar { display: none; }
+          .scrollbar-hide { scrollbar-width: none; }
+        `}</style>
+        {entry ? (
+          <entry.FormComponent webhookUrl={ENV_WEBHOOK_URL} standalone name={entry.name} />
+        ) : (
+          <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center">
+            <p className="font-display text-2xl mb-2" style={{ color: "#0F0F0F" }}>Checklist not found</p>
+            <p className="text-sm" style={{ color: "#8A7A5C" }}>This link may be invalid or the checklist has been removed.</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Clear stale localStorage when seed data version changes.
   (() => {
     try {
@@ -439,6 +712,7 @@ export default function App() {
   const [openTask, setOpenTask] = useState(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [checklistOpen, setChecklistOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [lastSync, setLastSync] = usePersistedState("ops.lastSync", new Date().toISOString());
@@ -768,6 +1042,9 @@ export default function App() {
               <button onClick={refresh} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                 {syncing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
               </button>
+              <button onClick={() => setChecklistOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Lift RCA Checklist" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                <ClipboardList size={15} />
+              </button>
               <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                 <Settings size={15} />
               </button>
@@ -896,6 +1173,12 @@ export default function App() {
             tasks={tasks}
             onClose={() => setNewTaskOpen(false)}
             onCreate={(data) => { addTask(data); setNewTaskOpen(false); }}
+          />
+        )}
+        {checklistOpen && (
+          <ChecklistDashboard
+            webhookUrl={webhookUrl}
+            onClose={() => setChecklistOpen(false)}
           />
         )}
         {settingsOpen && (
@@ -1961,6 +2244,565 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, envPassword, csvOverride, web
         </div>
       </div>
     </div>
+  );
+}
+
+function ChecklistDashboard({ webhookUrl, onClose }) {
+  const [activeId, setActiveId] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const copyLink = (id) => {
+    const url = `${window.location.origin}${window.location.pathname}?checklist=${id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
+
+  if (activeId) {
+    const entry = CHECKLIST_REGISTRY.find((c) => c.id === activeId);
+    return (
+      <entry.FormComponent
+        webhookUrl={webhookUrl}
+        onClose={() => setActiveId(null)}
+        name={entry.name}
+      />
+    );
+  }
+
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      <div className="absolute inset-0 flex flex-col sheet-anim" style={{ background: "#FAF6EE" }}>
+        {/* Header */}
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+          <div className="flex items-center gap-2">
+            <ClipboardList size={15} style={{ color: "#0F0F0F" }} />
+            <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>Checklists</span>
+          </div>
+          <div className="w-10" />
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-4 pb-8">
+          <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>
+            Fill in a checklist internally, or share a link with an external party so they can complete it without accessing the task board.
+          </p>
+          {CHECKLIST_REGISTRY.map((entry) => (
+            <div key={entry.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+              <div className="flex items-start justify-between gap-3 mb-1">
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm truncate" style={{ color: "#0F0F0F" }}>{entry.name}</p>
+                  <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "#8A7A5C" }}>{entry.description}</p>
+                </div>
+                <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+                  {entry.category}
+                </span>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => setActiveId(entry.id)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  style={{ background: "#0F0F0F", color: "white" }}
+                >
+                  <ClipboardList size={13} /> Fill In
+                </button>
+                <button
+                  onClick={() => copyLink(entry.id)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  style={{
+                    background: copiedId === entry.id ? "rgba(21,128,61,0.08)" : "#F0EBE0",
+                    color: copiedId === entry.id ? "#15803D" : "#3F3A2E",
+                    border: copiedId === entry.id ? "1px solid rgba(21,128,61,0.2)" : "1px solid transparent",
+                  }}
+                >
+                  {copiedId === entry.id ? <Check size={13} /> : <Download size={13} />}
+                  {copiedId === entry.id ? "Link copied!" : "Share link"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const CHECKLIST_INITIAL = {
+  building: "", liftId: "", dateOfFailure: "", timeOfFailure: "",
+  timeReported: "", timeTechArrived: "", timeLiftRestored: "",
+  serviceProvider: "", technicianName: "", incidentRef: "",
+  rcaCompleted: false, actualCause: "", failureCategory: "",
+  failureCategoryOther: "", failureDescription: "",
+  correctiveActionsCompleted: false,
+  correctiveActions: [{ action: "", dateCompleted: "", technician: "" }],
+  components: [{ component: "", actionTaken: "", partNumber: "", dateCompleted: "" }],
+  componentsRecorded: false, testingCompleted: false, safetyChecksCompleted: false,
+  tempMeasuresImplemented: false, tempMeasuresDetails: "",
+  tempMeasuresFrom: "", tempMeasuresTo: "",
+  tempMeasureRemoved: false, tempMeasureStillActive: false,
+  outstandingActions: [{ action: "", responsiblePerson: "", dueDate: "", status: "" }],
+  noOutstandingActions: false, outstandingCommunicated: false,
+  noResidualRisks: false, operationalRisk: false, reliabilityRisk: false,
+  safetyRisk: false, complianceRisk: false, riskDetails: "", mitigationMeasures: "",
+  operationalStatus: "", finalTestingCompleted: null, monitoringPeriod: "",
+  serviceProviderName: "", serviceProviderDate: "", fmName: "", fmDate: "",
+  landlordNotified: null, incidentClosedDate: "",
+  recipientEmail: "",
+};
+
+function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RCA Checklist" }) {
+  const [form, setForm] = useState(CHECKLIST_INITIAL);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+  const toggle = (key) => setForm((f) => ({ ...f, [key]: !f[key] }));
+
+  const addCorrRow = () => setForm((f) => ({ ...f, correctiveActions: [...f.correctiveActions, { action: "", dateCompleted: "", technician: "" }] }));
+  const removeCorrRow = (i) => setForm((f) => ({ ...f, correctiveActions: f.correctiveActions.filter((_, idx) => idx !== i) }));
+  const updateCorrRow = (i, field, val) => setForm((f) => ({ ...f, correctiveActions: f.correctiveActions.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const addCompRow = () => setForm((f) => ({ ...f, components: [...f.components, { component: "", actionTaken: "", partNumber: "", dateCompleted: "" }] }));
+  const removeCompRow = (i) => setForm((f) => ({ ...f, components: f.components.filter((_, idx) => idx !== i) }));
+  const updateCompRow = (i, field, val) => setForm((f) => ({ ...f, components: f.components.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const addOutRow = () => setForm((f) => ({ ...f, outstandingActions: [...f.outstandingActions, { action: "", responsiblePerson: "", dueDate: "", status: "" }] }));
+  const removeOutRow = (i) => setForm((f) => ({ ...f, outstandingActions: f.outstandingActions.filter((_, idx) => idx !== i) }));
+  const updateOutRow = (i, field, val) => setForm((f) => ({ ...f, outstandingActions: f.outstandingActions.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const pdfFileName = `lift-rca-${form.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+  const downloadPDF = () => generateChecklistPDF(form).save(pdfFileName);
+
+  const handleSubmit = async () => {
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const doc = generateChecklistPDF(form);
+      const pdfBase64 = doc.output("datauristring");
+      if (webhookUrl) {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            recipientEmail: form.recipientEmail,
+            incidentRef: form.incidentRef,
+            building: form.building,
+            liftId: form.liftId,
+            dateOfFailure: form.dateOfFailure,
+            formData: form,
+            pdfBase64,
+            pdfFileName,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(pdfFileName);
+      }
+      setSubmitted(true);
+    } catch (e) {
+      setSubmitError(e.message || "Submission failed — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const SectionHeader = ({ number, title }) => (
+    <div className="mt-5 mb-2 px-3 py-2 rounded-xl text-sm font-semibold" style={{ background: "#0F0F0F", color: "white" }}>
+      {number ? `${number}. ` : ""}{title}
+    </div>
+  );
+
+  const CheckRow = ({ label, checked, onChange }) => (
+    <button type="button" onClick={() => onChange(!checked)}
+      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
+      style={{ background: checked ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${checked ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
+      <div className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
+        style={{ background: checked ? "#0F4C5C" : "transparent", border: checked ? "none" : "1.5px solid #D1C9B8" }}>
+        {checked && <Check size={10} style={{ color: "white" }} />}
+      </div>
+      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
+    </button>
+  );
+
+  const RadioRow = ({ label, selected, onSelect }) => (
+    <button type="button" onClick={onSelect}
+      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
+      style={{ background: selected ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${selected ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
+      <div className="w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center"
+        style={{ border: selected ? "none" : "1.5px solid #D1C9B8", background: selected ? "#0F4C5C" : "transparent" }}>
+        {selected && <div className="w-2 h-2 rounded-full bg-white" />}
+      </div>
+      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
+    </button>
+  );
+
+  const InputRow = ({ label, value, onChange, type = "text", placeholder = "" }) => (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+    </div>
+  );
+
+  const TextareaRow = ({ label, value, onChange, placeholder = "", rows = 3 }) => (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+        className="w-full bg-transparent outline-none text-sm resize-none" style={{ color: "#0F0F0F" }} />
+    </div>
+  );
+
+  const resetForm = () => { setForm(CHECKLIST_INITIAL); setSubmitted(false); setSubmitError(""); };
+
+  const Outer = standalone
+    ? ({ children }) => (
+        <div className="min-h-screen flex flex-col" style={{ background: "#FAF6EE" }}>
+          {children}
+        </div>
+      )
+    : ({ children }) => (
+        <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="absolute inset-0 flex flex-col sheet-anim" style={{ background: "#FAF6EE" }}>
+            {children}
+          </div>
+        </div>
+      );
+
+  return (
+    <Outer>
+        {/* Header */}
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+          {standalone ? (
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#0F0F0F" }}>
+                <ClipboardList size={13} style={{ color: "white" }} />
+              </div>
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>Incident Report</span>
+            </div>
+          ) : (
+            <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>
+              ← Back
+            </button>
+          )}
+          <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+          <button onClick={handleSubmit} disabled={submitting}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+            style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
+            {submitting ? "Sending…" : "Submit"}
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+          {submitted ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+                <CheckCircle2 size={28} style={{ color: "#15803D" }} />
+              </div>
+              <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>Report submitted</p>
+              <p className="text-sm mb-6" style={{ color: "#8A7A5C" }}>
+                The completed RCA report has been sent{form.recipientEmail ? ` to ${form.recipientEmail}` : ""} via your webhook.
+              </p>
+              <button onClick={downloadPDF}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+                style={{ background: "#0F4C5C", color: "white" }}>
+                <Download size={14} /> Download PDF copy
+              </button>
+              <button onClick={standalone ? resetForm : onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
+                {standalone ? "Submit another report" : "Close"}
+              </button>
+            </div>
+          ) : (
+            <>
+              {submitError && (
+                <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>
+                  {submitError}
+                </div>
+              )}
+              {!webhookUrl && (
+                <div className="mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#FEF3C7", border: "1px solid rgba(180,83,9,0.2)", color: "#92400E" }}>
+                  No webhook configured — submitting will download the PDF locally instead.
+                </div>
+              )}
+
+              {/* Lift Details */}
+              <SectionHeader title="Lift Details" />
+              <InputRow label="Building / Location" value={form.building} onChange={(v) => set("building", v)} />
+              <InputRow label="Lift Identification (A/B/C/D…)" value={form.liftId} onChange={(v) => set("liftId", v)} />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <InputRow label="Date of Failure" value={form.dateOfFailure} onChange={(v) => set("dateOfFailure", v)} type="date" />
+                </div>
+                <div className="flex-1">
+                  <InputRow label="Time of Failure" value={form.timeOfFailure} onChange={(v) => set("timeOfFailure", v)} type="time" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <InputRow label="Time Reported" value={form.timeReported} onChange={(v) => set("timeReported", v)} type="time" />
+                </div>
+                <div className="flex-1">
+                  <InputRow label="Tech Arrived" value={form.timeTechArrived} onChange={(v) => set("timeTechArrived", v)} type="time" />
+                </div>
+              </div>
+              <InputRow label="Time Lift Restored" value={form.timeLiftRestored} onChange={(v) => set("timeLiftRestored", v)} type="time" />
+              <InputRow label="Service Provider" value={form.serviceProvider} onChange={(v) => set("serviceProvider", v)} />
+              <InputRow label="Technician Name" value={form.technicianName} onChange={(v) => set("technicianName", v)} />
+              <InputRow label="Incident Reference No." value={form.incidentRef} onChange={(v) => set("incidentRef", v)} />
+
+              {/* Section 1: RCA */}
+              <SectionHeader number="1" title="Root Cause Analysis (RCA)" />
+              <CheckRow label="Detailed RCA completed and attached" checked={form.rcaCompleted} onChange={(v) => set("rcaCompleted", v)} />
+              <TextareaRow label="Actual Cause of Failure" value={form.actualCause} onChange={(v) => set("actualCause", v)} rows={3} />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Failure Category</div>
+                {[
+                  ["electrical", "Electrical Fault"],
+                  ["mechanical", "Mechanical Fault"],
+                  ["control", "Control System Fault"],
+                  ["door", "Door System Fault"],
+                  ["safety", "Safety Circuit Fault"],
+                  ["external", "External Cause (Power Surge / Electrical Disturbance / Other)"],
+                  ["other", "Other"],
+                ].map(([key, label]) => (
+                  <RadioRow key={key} label={label} selected={form.failureCategory === key} onSelect={() => set("failureCategory", key)} />
+                ))}
+                {form.failureCategory === "other" && (
+                  <input value={form.failureCategoryOther} onChange={(e) => set("failureCategoryOther", e.target.value)}
+                    placeholder="Specify other cause…" className="w-full bg-transparent outline-none text-sm mt-1 px-1"
+                    style={{ color: "#0F0F0F", borderBottom: "1px solid rgba(0,0,0,0.1)" }} />
+                )}
+              </div>
+              <TextareaRow label="Description of Failure" value={form.failureDescription} onChange={(v) => set("failureDescription", v)} rows={4} />
+
+              {/* Section 2: Corrective Actions */}
+              <SectionHeader number="2" title="Corrective Actions Undertaken" />
+              <CheckRow label="Corrective actions completed and documented" checked={form.correctiveActionsCompleted} onChange={(v) => set("correctiveActionsCompleted", v)} />
+              {form.correctiveActions.map((row, i) => (
+                <div key={i} className="rounded-xl p-4 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase" style={{ color: "#8A7A5C" }}>Action {i + 1}</span>
+                    {form.correctiveActions.length > 1 && (
+                      <button onClick={() => removeCorrRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                    )}
+                  </div>
+                  <textarea value={row.action} onChange={(e) => updateCorrRow(i, "action", e.target.value)}
+                    placeholder="Description of action taken…" rows={2}
+                    className="w-full bg-transparent outline-none text-sm resize-none mb-3" style={{ color: "#0F0F0F", borderBottom: "1px solid rgba(0,0,0,0.06)" }} />
+                  <div className="flex gap-3 mt-2">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date completed</div>
+                      <input type="date" value={row.dateCompleted} onChange={(e) => updateCorrRow(i, "dateCompleted", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Technician</div>
+                      <input value={row.technician} onChange={(e) => updateCorrRow(i, "technician", e.target.value)}
+                        placeholder="Name" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <button onClick={addCorrRow} className="w-full py-2.5 rounded-xl text-sm font-semibold mb-2 transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
+                + Add Action
+              </button>
+
+              {/* Section 3: Components */}
+              <SectionHeader number="3" title="Components Repaired / Adjusted / Tested / Replaced" />
+              {form.components.map((row, i) => (
+                <div key={i} className="rounded-xl p-4 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase" style={{ color: "#8A7A5C" }}>Component {i + 1}</span>
+                    {form.components.length > 1 && (
+                      <button onClick={() => removeCompRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                    )}
+                  </div>
+                  <div className="flex gap-3 mb-3">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Component</div>
+                      <input value={row.component} onChange={(e) => updateCompRow(i, "component", e.target.value)}
+                        placeholder="Component name" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Action taken</div>
+                      <select value={row.actionTaken} onChange={(e) => updateCompRow(i, "actionTaken", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }}>
+                        <option value="">Select…</option>
+                        <option>Repair</option>
+                        <option>Adjust</option>
+                        <option>Test</option>
+                        <option>Replace</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Part number</div>
+                      <input value={row.partNumber} onChange={(e) => updateCompRow(i, "partNumber", e.target.value)}
+                        placeholder="Optional" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date completed</div>
+                      <input type="date" value={row.dateCompleted} onChange={(e) => updateCompRow(i, "dateCompleted", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <button onClick={addCompRow} className="w-full py-2.5 rounded-xl text-sm font-semibold mb-2 transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
+                + Add Component
+              </button>
+              <CheckRow label="All replaced components recorded" checked={form.componentsRecorded} onChange={(v) => set("componentsRecorded", v)} />
+              <CheckRow label="Testing completed after repairs" checked={form.testingCompleted} onChange={(v) => set("testingCompleted", v)} />
+              <CheckRow label="Lift safety checks completed" checked={form.safetyChecksCompleted} onChange={(v) => set("safetyChecksCompleted", v)} />
+
+              {/* Section 4: Temporary Measures */}
+              <SectionHeader number="4" title="Temporary Measures Implemented" />
+              <CheckRow label="Temporary measures implemented to restore service" checked={form.tempMeasuresImplemented} onChange={(v) => set("tempMeasuresImplemented", v)} />
+              <TextareaRow label="Details of Temporary Measures" value={form.tempMeasuresDetails} onChange={(v) => set("tempMeasuresDetails", v)} rows={3} />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <InputRow label="Duration From" value={form.tempMeasuresFrom} onChange={(v) => set("tempMeasuresFrom", v)} type="date" />
+                </div>
+                <div className="flex-1">
+                  <InputRow label="To" value={form.tempMeasuresTo} onChange={(v) => set("tempMeasuresTo", v)} type="date" />
+                </div>
+              </div>
+              <CheckRow label="Temporary measure removed after permanent repair" checked={form.tempMeasureRemoved} onChange={(v) => set("tempMeasureRemoved", v)} />
+              <CheckRow label="Temporary measure still active" checked={form.tempMeasureStillActive} onChange={(v) => set("tempMeasureStillActive", v)} />
+
+              {/* Section 5: Outstanding Actions */}
+              <SectionHeader number="5" title="Outstanding Remedial Actions" />
+              {form.outstandingActions.map((row, i) => (
+                <div key={i} className="rounded-xl p-4 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase" style={{ color: "#8A7A5C" }}>Item {i + 1}</span>
+                    {form.outstandingActions.length > 1 && (
+                      <button onClick={() => removeOutRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                    )}
+                  </div>
+                  <textarea value={row.action} onChange={(e) => updateOutRow(i, "action", e.target.value)}
+                    placeholder="Outstanding action…" rows={2}
+                    className="w-full bg-transparent outline-none text-sm resize-none mb-3" style={{ color: "#0F0F0F", borderBottom: "1px solid rgba(0,0,0,0.06)" }} />
+                  <div className="flex gap-3 mt-2">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Responsible person</div>
+                      <input value={row.responsiblePerson} onChange={(e) => updateOutRow(i, "responsiblePerson", e.target.value)}
+                        placeholder="Name" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Due date</div>
+                      <input type="date" value={row.dueDate} onChange={(e) => updateOutRow(i, "dueDate", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Status</div>
+                    <input value={row.status} onChange={(e) => updateOutRow(i, "status", e.target.value)}
+                      placeholder="e.g. Pending, In Progress, Done" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                </div>
+              ))}
+              <button onClick={addOutRow} className="w-full py-2.5 rounded-xl text-sm font-semibold mb-2 transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
+                + Add Outstanding Action
+              </button>
+              <CheckRow label="No outstanding actions" checked={form.noOutstandingActions} onChange={(v) => set("noOutstandingActions", v)} />
+              <CheckRow label="Outstanding actions communicated to Facilities Management" checked={form.outstandingCommunicated} onChange={(v) => set("outstandingCommunicated", v)} />
+
+              {/* Section 6: Risks */}
+              <SectionHeader number="6" title="Residual Operational / Reliability / Safety Risks" />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Remaining Risks Identified</div>
+                <CheckRow label="No residual risks identified" checked={form.noResidualRisks} onChange={(v) => set("noResidualRisks", v)} />
+                <CheckRow label="Operational Risk" checked={form.operationalRisk} onChange={(v) => set("operationalRisk", v)} />
+                <CheckRow label="Reliability Risk" checked={form.reliabilityRisk} onChange={(v) => set("reliabilityRisk", v)} />
+                <CheckRow label="Safety Risk" checked={form.safetyRisk} onChange={(v) => set("safetyRisk", v)} />
+                <CheckRow label="Compliance Risk" checked={form.complianceRisk} onChange={(v) => set("complianceRisk", v)} />
+              </div>
+              <TextareaRow label="Risk Details" value={form.riskDetails} onChange={(v) => set("riskDetails", v)} rows={3} />
+              <TextareaRow label="Recommended Mitigation Measures" value={form.mitigationMeasures} onChange={(v) => set("mitigationMeasures", v)} rows={3} />
+
+              {/* Section 7: Final Verification */}
+              <SectionHeader number="7" title="Final Verification & Sign-Off" />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Lift Operational Status</div>
+                <RadioRow label="Fully Operational" selected={form.operationalStatus === "fully"} onSelect={() => set("operationalStatus", "fully")} />
+                <RadioRow label="Operational with Monitoring Required" selected={form.operationalStatus === "monitoring"} onSelect={() => set("operationalStatus", "monitoring")} />
+                <RadioRow label="Out of Service" selected={form.operationalStatus === "outofservice"} onSelect={() => set("operationalStatus", "outofservice")} />
+              </div>
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Final Testing Completed</div>
+                <RadioRow label="Yes" selected={form.finalTestingCompleted === true} onSelect={() => set("finalTestingCompleted", true)} />
+                <RadioRow label="No" selected={form.finalTestingCompleted === false} onSelect={() => set("finalTestingCompleted", false)} />
+              </div>
+              <InputRow label="Monitoring Period Required" value={form.monitoringPeriod} onChange={(v) => set("monitoringPeriod", v)} placeholder="e.g. 2 weeks" />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Service Provider Confirmation</div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Name</div>
+                    <input value={form.serviceProviderName} onChange={(e) => set("serviceProviderName", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date</div>
+                    <input type="date" value={form.serviceProviderDate} onChange={(e) => set("serviceProviderDate", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Facilities Management Verification</div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Name</div>
+                    <input value={form.fmName} onChange={(e) => set("fmName", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date</div>
+                    <input type="date" value={form.fmDate} onChange={(e) => set("fmDate", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Landlord Notification Completed</div>
+                <RadioRow label="Yes" selected={form.landlordNotified === true} onSelect={() => set("landlordNotified", true)} />
+                <RadioRow label="No" selected={form.landlordNotified === false} onSelect={() => set("landlordNotified", false)} />
+              </div>
+              <InputRow label="Incident Closed Date" value={form.incidentClosedDate} onChange={(v) => set("incidentClosedDate", v)} type="date" />
+
+              {/* Email & Submit */}
+              <SectionHeader title="Send Report" />
+              <InputRow label="Recipient Email Address" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="e.g. facilities@company.com" />
+              <div className="flex gap-2 mt-2">
+                <button onClick={downloadPDF}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
+                  <Download size={14} /> Download PDF
+                </button>
+                <button onClick={handleSubmit} disabled={submitting}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                  {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                  {submitting ? "Sending…" : webhookUrl ? "Send via Webhook" : "Download PDF"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+    </Outer>
   );
 }
 
