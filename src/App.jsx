@@ -9,6 +9,12 @@ import {
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  "https://wbntrynyoymukhswcvgm.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndibnRyeW55b3ltdWtoc3djdmdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyMjUzMDQsImV4cCI6MjEwMDgwMTMwNH0.jtxR8OqtgtYHRdn1PFeXOb91NHhNwJFcfmjc0f-RWZc"
+);
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
 const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHe-qEY2VB71JlIVsx40UPWQGGMRXmAuJ0-hWKTmkvbrzJJt6jDJv2Evw9au27nX705LEwwPzkjLr8/pub?output=csv";
@@ -643,17 +649,20 @@ const BUILDING_CODES = {
 
 const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA" };
 
-const generateIncidentRef = (building, checklistId) => {
+const generateIncidentRef = async (building, checklistId) => {
   const code = BUILDING_CODES[building];
   if (!code) return "";
   const typeCode = CHECKLIST_TYPE_CODES[checklistId] || "CHK";
   const year = new Date().getFullYear();
   try {
-    const saved = JSON.parse(localStorage.getItem("ops.checklistSubmissions") || "[]");
-    const count = saved.filter(
-      (s) => s.building === building && s.checklistId === checklistId && new Date(s.submittedAt).getFullYear() === year
-    ).length;
-    return `${code}-${typeCode}-${year}-${String(count + 1).padStart(3, "0")}`;
+    const { count } = await supabase
+      .from("checklist_submissions")
+      .select("*", { count: "exact", head: true })
+      .eq("building", building)
+      .eq("checklist_id", checklistId)
+      .gte("submitted_at", `${year}-01-01T00:00:00.000Z`)
+      .lt("submitted_at", `${year + 1}-01-01T00:00:00.000Z`);
+    return `${code}-${typeCode}-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
   } catch {
     return `${code}-${typeCode}-${year}-001`;
   }
@@ -2337,39 +2346,67 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, envPassword, csvOverride, web
 
 function ChecklistDashboard({ webhookUrl, onClose }) {
   const [activeId, setActiveId] = useState(null);
+  const [editingSubmission, setEditingSubmission] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const [tab, setTab] = useState("checklists");
-  const [submissions, setSubmissions] = usePersistedState("ops.checklistSubmissions", []);
+  const [submissions, setSubmissions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  const fetchSubmissions = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const { data, error } = await supabase
+        .from("checklist_submissions")
+        .select("*")
+        .order("submitted_at", { ascending: false });
+      if (error) throw error;
+      setSubmissions(data || []);
+    } catch {
+      setLoadError("Could not load submissions. Check your connection.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchSubmissions(); }, [fetchSubmissions]);
 
   const copyLink = (id) => {
     const url = `${window.location.origin}${window.location.pathname}?checklist=${id}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    });
+    navigator.clipboard.writeText(url)
+      .then(() => { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); })
+      .catch(() => {});
   };
 
-  const saveSubmission = (entry, formData, pdfFileName) => {
+  const saveSubmission = async (entry, formData, pdfFileName, existingId = null) => {
     const record = {
-      id: uuid(),
-      checklistId: entry.id,
-      checklistName: entry.name,
-      submittedAt: new Date().toISOString(),
-      recipientEmail: formData.recipientEmail,
+      checklist_id: entry.id,
+      incident_ref: formData.incidentRef,
       building: formData.building,
-      liftId: formData.liftId,
-      incidentRef: formData.incidentRef,
-      dateOfFailure: formData.dateOfFailure,
-      pdfFileName,
-      formData,
+      lift_id: formData.liftId,
+      date_of_failure: formData.dateOfFailure,
+      submitted_at: new Date().toISOString(),
+      pdf_file_name: pdfFileName,
+      form_data: formData,
     };
-    setSubmissions((prev) => [record, ...prev]);
+    try {
+      if (existingId) {
+        await supabase.from("checklist_submissions").update(record).eq("id", existingId);
+      } else {
+        await supabase.from("checklist_submissions").insert(record);
+      }
+      await fetchSubmissions();
+    } catch {
+      // submission already saved via webhook; non-critical
+    }
+    setActiveId(null);
+    setEditingSubmission(null);
   };
 
   const redownload = (sub) => {
-    const entry = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklistId);
-    if (!entry) return;
-    generateChecklistPDF(sub.formData).save(sub.pdfFileName);
+    const fileName = sub.pdf_file_name || `lift-rca-${sub.incident_ref || "report"}.pdf`;
+    generateChecklistPDF(sub.form_data).save(fileName);
   };
 
   const fmtSubmittedAt = (iso) => {
@@ -2377,14 +2414,19 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
     return d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
   };
 
-  if (activeId) {
-    const entry = CHECKLIST_REGISTRY.find((c) => c.id === activeId);
+  if (activeId || editingSubmission) {
+    const entry = editingSubmission
+      ? CHECKLIST_REGISTRY.find((c) => c.id === editingSubmission.checklist_id)
+      : CHECKLIST_REGISTRY.find((c) => c.id === activeId);
+    if (!entry) return null;
     return (
       <entry.FormComponent
         webhookUrl={webhookUrl}
-        onClose={() => setActiveId(null)}
+        onClose={() => { setActiveId(null); setEditingSubmission(null); }}
         name={entry.name}
-        onSave={(formData, pdfFileName) => saveSubmission(entry, formData, pdfFileName)}
+        initialData={editingSubmission?.form_data || null}
+        submissionId={editingSubmission?.id || null}
+        onSave={(formData, pdfFileName, subId) => saveSubmission(entry, formData, pdfFileName, subId)}
       />
     );
   }
@@ -2451,7 +2493,16 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
-            {submissions.length === 0 ? (
+            {loading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} />
+              </div>
+            ) : loadError ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <p className="text-sm mb-3" style={{ color: "#B91C1C" }}>{loadError}</p>
+                <button onClick={fetchSubmissions} className="text-xs font-semibold" style={{ color: "#8A7A5C" }}>Try again</button>
+              </div>
+            ) : submissions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
                   <ClipboardList size={20} style={{ color: "#8A7A5C" }} />
@@ -2460,35 +2511,45 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
                 <p className="text-xs" style={{ color: "#8A7A5C" }}>Submitted forms will appear here.</p>
               </div>
             ) : (
-              submissions.map((sub) => (
-                <div key={sub.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm" style={{ color: "#0F0F0F" }}>
-                        {sub.building || "—"}{sub.liftId ? ` · ${sub.liftId}` : ""}
-                      </p>
-                      {sub.incidentRef && (
-                        <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Ref: {sub.incidentRef}</p>
-                      )}
+              submissions.map((sub) => {
+                const entryName = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id)?.name || sub.checklist_id;
+                return (
+                  <div key={sub.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm" style={{ color: "#0F0F0F" }}>
+                          {sub.building || "—"}{sub.lift_id ? ` · ${sub.lift_id}` : ""}
+                        </p>
+                        {sub.incident_ref && (
+                          <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Ref: {sub.incident_ref}</p>
+                        )}
+                      </div>
+                      <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+                        {entryName.split(" ")[0]}
+                      </span>
                     </div>
-                    <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
-                      {sub.checklistName?.split(" ")[0]}
-                    </span>
+                    <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: "#8A7A5C" }}>
+                      {sub.date_of_failure && <span>Failure: {sub.date_of_failure}</span>}
+                      <span>Submitted: {fmtSubmittedAt(sub.submitted_at)}</span>
+                    </div>
+                    {sub.form_data?.recipientEmail && (
+                      <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.form_data.recipientEmail}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <button onClick={() => redownload(sub)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                        style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+                        <Download size={13} /> Download PDF
+                      </button>
+                      <button onClick={() => setEditingSubmission(sub)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                        style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)" }}>
+                        Edit
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: "#8A7A5C" }}>
-                    {sub.dateOfFailure && <span>Failure: {sub.dateOfFailure}</span>}
-                    <span>Submitted: {fmtSubmittedAt(sub.submittedAt)}</span>
-                  </div>
-                  {sub.recipientEmail && (
-                    <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.recipientEmail}</p>
-                  )}
-                  <button onClick={() => redownload(sub)}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                    style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
-                    <Download size={13} /> Download PDF
-                  </button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
@@ -2577,19 +2638,19 @@ const CHECKLIST_INITIAL = {
   recipientEmail: "",
 };
 
-function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RCA Checklist", onSave }) {
-  const [form, setForm] = useState(CHECKLIST_INITIAL);
+function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RCA Checklist", onSave, initialData = null, submissionId = null }) {
+  const [form, setForm] = useState(initialData || CHECKLIST_INITIAL);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
-  const toggle = (key) => setForm((f) => ({ ...f, [key]: !f[key] }));
 
-  // Auto-generate incident reference when building is chosen
+  // Auto-generate incident reference when building is chosen (skip when editing an existing submission)
   useEffect(() => {
+    if (submissionId) return;
     if (form.building) {
-      set("incidentRef", generateIncidentRef(form.building, "lift-rca"));
+      generateIncidentRef(form.building, "lift-rca").then((ref) => set("incidentRef", ref));
     } else {
       set("incidentRef", "");
     }
@@ -2607,16 +2668,24 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
   const removeOutRow = (i) => setForm((f) => ({ ...f, outstandingActions: f.outstandingActions.filter((_, idx) => idx !== i) }));
   const updateOutRow = (i, field, val) => setForm((f) => ({ ...f, outstandingActions: f.outstandingActions.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
 
-  const pdfFileName = `lift-rca-${form.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
-
-  const downloadPDF = () => generateChecklistPDF(form).save(pdfFileName);
+  const downloadPDF = () => {
+    const fileName = `lift-rca-${form.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateChecklistPDF(form).save(fileName);
+  };
 
   const handleSubmit = async () => {
     if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
     setSubmitting(true);
     setSubmitError("");
     try {
-      const doc = generateChecklistPDF(form);
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "lift-rca");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `lift-rca-${finalForm.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateChecklistPDF(finalForm);
       const pdfBase64 = doc.output("datauristring");
       if (webhookUrl) {
         const res = await fetch(webhookUrl, {
@@ -2625,22 +2694,22 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
           body: JSON.stringify({
             action: "checklist_submission",
             timestamp: new Date().toISOString(),
-            recipientEmail: form.recipientEmail,
-            incidentRef: form.incidentRef,
-            building: form.building,
-            liftId: form.liftId,
-            dateOfFailure: form.dateOfFailure,
-            formData: form,
+            recipientEmail: finalForm.recipientEmail,
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            liftId: finalForm.liftId,
+            dateOfFailure: finalForm.dateOfFailure,
+            formData: finalForm,
             pdfBase64,
-            pdfFileName,
+            pdfFileName: fileName,
           }),
         });
         if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
       } else {
-        doc.save(pdfFileName);
+        doc.save(fileName);
       }
       setSubmitted(true);
-      if (onSave) onSave(form, pdfFileName);
+      if (onSave) onSave(finalForm, fileName, submissionId);
     } catch (e) {
       setSubmitError(e.message || "Submission failed — please try again.");
     } finally {
@@ -2672,7 +2741,7 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
             style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
             {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? "Sending…" : "Submit"}
+            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
           </button>
         </div>
 
@@ -2683,9 +2752,11 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
               <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
                 <CheckCircle2 size={28} style={{ color: "#15803D" }} />
               </div>
-              <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>Report submitted</p>
+              <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Report updated" : "Report submitted"}</p>
               <p className="text-sm mb-6" style={{ color: "#8A7A5C" }}>
-                The completed RCA report has been sent{form.recipientEmail ? ` to ${form.recipientEmail}` : ""} via your webhook.
+                {submissionId
+                  ? "The record has been updated and a new report sent."
+                  : `The completed RCA report has been sent${form.recipientEmail ? ` to ${form.recipientEmail}` : ""} via your webhook.`}
               </p>
               <button onClick={downloadPDF}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
