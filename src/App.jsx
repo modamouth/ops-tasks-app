@@ -685,6 +685,34 @@ const generateGeneratorPDF = (form) => {
     doc.text(`Ref: ${form.incidentRef}`, m, yRef);
   }
 
+  // Installation photos — one per page
+  const photoRows = (form.tenantRows || []).filter((r) => r.pictureOfInstallation === "Yes" && r.installationPhoto);
+  if (photoRows.length > 0) {
+    const pageH = doc.internal.pageSize.getHeight();
+    photoRows.forEach((row) => {
+      doc.addPage();
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(15, 15, 15);
+      doc.text("Installation Photo", m, 14);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(138, 122, 92);
+      const label = [row.premises, row.tenantName, row.tradingName].filter(Boolean).join(" · ");
+      doc.text(label || "Tenant", m, 21);
+      doc.setTextColor(15, 15, 15);
+      const maxW = pageW - m * 2;
+      const maxH = pageH - 32;
+      // Fit image proportionally
+      const img = new Image();
+      img.src = row.installationPhoto;
+      const iW = img.naturalWidth || 1200;
+      const iH = img.naturalHeight || 900;
+      const ratio = Math.min(maxW / iW, maxH / iH);
+      doc.addImage(row.installationPhoto, "JPEG", m, 26, iW * ratio, iH * ratio);
+    });
+  }
+
   return doc;
 };
 
@@ -2504,7 +2532,7 @@ const GENERATOR_INITIAL = {
   building: "",
   incidentRef: "",
   recipientEmail: "",
-  tenantRows: [{ premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }],
+  tenantRows: [{ premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", installationPhoto: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }],
   centreGenerators: [{ type: "", size: "", serialNumbers: "", amountOfDiesel: "", areaCovered: "" }],
 };
 
@@ -2527,7 +2555,7 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
     }
   }, [form.building]);
 
-  const addTenantRow = () => setForm((f) => ({ ...f, tenantRows: [...f.tenantRows, { premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }] }));
+  const addTenantRow = () => setForm((f) => ({ ...f, tenantRows: [...f.tenantRows, { premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", installationPhoto: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }] }));
   const removeTenantRow = (i) => setForm((f) => ({ ...f, tenantRows: f.tenantRows.filter((_, idx) => idx !== i) }));
   const updateTenantRow = (i, field, val) => setForm((f) => ({ ...f, tenantRows: f.tenantRows.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
 
@@ -2717,6 +2745,9 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
                 <InputRow label="Trading Name" value={row.tradingName} onChange={(v) => updateTenantRow(i, "tradingName", v)} />
                 <YesNoRow label="Generator Installed?" value={row.generatorInstalled} onChange={(v) => updateTenantRow(i, "generatorInstalled", v)} includeNA />
                 <YesNoRow label="Picture of Installation?" value={row.pictureOfInstallation} onChange={(v) => updateTenantRow(i, "pictureOfInstallation", v)} />
+                {row.pictureOfInstallation === "Yes" && (
+                  <PhotoUploadRow value={row.installationPhoto} onChange={(v) => updateTenantRow(i, "installationPhoto", v)} />
+                )}
                 <YesNoRow label="Is Diesel Stored on Site?" value={row.dieselOnSite} onChange={(v) => updateTenantRow(i, "dieselOnSite", v)} />
                 {row.dieselOnSite === "Yes" && (
                   <InputRow label="Amount of Diesel Stored" value={row.amountOfDiesel} onChange={(v) => updateTenantRow(i, "amountOfDiesel", v)} placeholder="e.g. 200 L" />
@@ -3100,6 +3131,57 @@ function YesNoRow({ label, value, onChange, includeNA = false }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function PhotoUploadRow({ value, onChange }) {
+  const compressImage = (file) => new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1200;
+        let w = img.width, h = img.height;
+        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const compressed = await compressImage(file);
+    onChange(compressed);
+    e.target.value = "";
+  };
+
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Installation Photo</div>
+      {value ? (
+        <div className="relative">
+          <img src={value} alt="Installation" className="w-full rounded-xl object-cover" style={{ maxHeight: 220 }} />
+          <button onClick={() => onChange("")} type="button"
+            className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.55)" }}>
+            <X size={13} style={{ color: "white" }} />
+          </button>
+        </div>
+      ) : (
+        <label className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl cursor-pointer transition-all active:scale-[0.99]"
+          style={{ background: "#F0EBE0", border: "1px dashed rgba(0,0,0,0.15)" }}>
+          <Camera size={20} style={{ color: "#8A7A5C" }} />
+          <span className="text-xs font-semibold" style={{ color: "#8A7A5C" }}>Tap to add photo</span>
+          <input type="file" accept="image/*" capture="environment" onChange={handleFile} className="hidden" />
+        </label>
+      )}
     </div>
   );
 }
