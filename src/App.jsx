@@ -627,6 +627,67 @@ const generateChecklistPDF = (form) => {
   return doc;
 };
 
+const generateGeneratorPDF = (form) => {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const m = 14;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("Generator Information", pageW / 2, 16, { align: "center" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(138, 122, 92);
+  doc.text(form.building || "", pageW / 2, 23, { align: "center" });
+  doc.setTextColor(15, 15, 15);
+
+  autoTable(doc, {
+    startY: 28,
+    margin: { left: m, right: m },
+    head: [["Premises / Unit", "Tenant Name", "Trading Name", "Generator\nInstalled", "Picture of\nInstallation", "Diesel\non Site", "Amount of\nDiesel Stored", "COC\nCertificate"]],
+    body: form.tenantRows.map((r) => [
+      r.premises || "", r.tenantName || "", r.tradingName || "",
+      r.generatorInstalled || "", r.pictureOfInstallation || "",
+      r.dieselOnSite || "", r.dieselOnSite === "Yes" ? (r.amountOfDiesel || "") : "—",
+      r.cocCertificate || "",
+    ]),
+    headStyles: { fillColor: [15, 15, 15], textColor: 255, fontStyle: "bold", fontSize: 8 },
+    bodyStyles: { fontSize: 8, textColor: [15, 15, 15], minCellHeight: 10 },
+    columnStyles: { 0: { cellWidth: 28 }, 1: { cellWidth: 34 }, 2: { cellWidth: 34 }, 3: { cellWidth: 22 }, 4: { cellWidth: 22 }, 5: { cellWidth: 20 }, 6: { cellWidth: 28 }, 7: { cellWidth: 22 } },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+
+  const y2 = doc.lastAutoTable.finalY + 8;
+  doc.setFillColor(240, 140, 60);
+  doc.rect(m, y2, pageW - m * 2, 7, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(255, 255, 255);
+  doc.text("Generator for Centre", m + 3, y2 + 5);
+  doc.setTextColor(15, 15, 15);
+
+  autoTable(doc, {
+    startY: y2 + 9,
+    margin: { left: m, right: m },
+    head: [["Type", "Size / kVA", "Serial Numbers", "Amount of Diesel Stored", "Area and Items Generator Covers"]],
+    body: form.centreGenerators.map((r) => [r.type || "", r.size || "", r.serialNumbers || "", r.amountOfDiesel || "", r.areaCovered || ""]),
+    headStyles: { fillColor: [240, 140, 60], textColor: 255, fontStyle: "bold", fontSize: 8 },
+    bodyStyles: { fontSize: 8, textColor: [15, 15, 15], minCellHeight: 10 },
+    columnStyles: { 0: { cellWidth: 30 }, 1: { cellWidth: 28 }, 2: { cellWidth: 50 }, 3: { cellWidth: 40 } },
+    alternateRowStyles: { fillColor: [255, 243, 230] },
+  });
+
+  if (form.incidentRef) {
+    const yRef = doc.lastAutoTable.finalY + 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(138, 122, 92);
+    doc.text(`Ref: ${form.incidentRef}`, m, yRef);
+  }
+
+  return doc;
+};
+
 const BUILDING_CODES = {
   "269 Independence": "IND",
   "44 On Post": "ONP",
@@ -647,7 +708,7 @@ const BUILDING_CODES = {
   "Windhoek Sanlam Centre": "WSC",
 };
 
-const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA" };
+const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA", "generator-info": "GENI" };
 
 const generateIncidentRef = async (building, checklistId) => {
   const code = BUILDING_CODES[building];
@@ -727,6 +788,13 @@ const CHECKLIST_REGISTRY = [
     description: "Root Cause Analysis & Corrective Actions for lift failure incidents",
     category: "Mechanical",
     FormComponent: (props) => <LiftRCASheet {...props} />,
+  },
+  {
+    id: "generator-info",
+    name: "Generator Information",
+    description: "Tenant and centre generator audit: installation, diesel storage, and COC certificates",
+    category: "Electrical",
+    FormComponent: (props) => <GeneratorSheet {...props} />,
   },
 ];
 
@@ -2430,6 +2498,265 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, envPassword, csvOverride, web
   );
 }
 
+const GENERATOR_INITIAL = {
+  building: "",
+  incidentRef: "",
+  recipientEmail: "",
+  tenantRows: [{ premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }],
+  centreGenerators: [{ type: "", size: "", serialNumbers: "", amountOfDiesel: "", areaCovered: "" }],
+};
+
+function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Generator Information", onSave, initialData = null, submissionId = null }) {
+  const [form, setForm] = useState(initialData || GENERATOR_INITIAL);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  useEffect(() => {
+    if (submissionId) return;
+    if (form.building) {
+      generateIncidentRef(form.building, "generator-info").then((ref) => set("incidentRef", ref));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
+  const addTenantRow = () => setForm((f) => ({ ...f, tenantRows: [...f.tenantRows, { premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }] }));
+  const removeTenantRow = (i) => setForm((f) => ({ ...f, tenantRows: f.tenantRows.filter((_, idx) => idx !== i) }));
+  const updateTenantRow = (i, field, val) => setForm((f) => ({ ...f, tenantRows: f.tenantRows.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const addCentreRow = () => setForm((f) => ({ ...f, centreGenerators: [...f.centreGenerators, { type: "", size: "", serialNumbers: "", amountOfDiesel: "", areaCovered: "" }] }));
+  const removeCentreRow = (i) => setForm((f) => ({ ...f, centreGenerators: f.centreGenerators.filter((_, idx) => idx !== i) }));
+  const updateCentreRow = (i, field, val) => setForm((f) => ({ ...f, centreGenerators: f.centreGenerators.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const downloadPDF = () => {
+    const fileName = `generator-info-${form.incidentRef || form.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateGeneratorPDF(form).save(fileName);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.building) { setSubmitError("Please select a building."); return; }
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "generator-info");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `generator-info-${finalForm.incidentRef || finalForm.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateGeneratorPDF(finalForm);
+      const pdfBase64 = doc.output("datauristring");
+
+      let resolvedId = submissionId;
+      if (standalone && !submissionId && onSave) {
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}` : null;
+
+      if (webhookUrl) {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            recipientEmail: finalForm.recipientEmail,
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            formData: finalForm,
+            pdfBase64,
+            pdfFileName: fileName,
+            editLink,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(fileName);
+      }
+
+      if (onSave && !(standalone && !submissionId)) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
+      setSubmitted(true);
+    } catch (e) {
+      setSubmitError(e.message || "Submission failed — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => { setForm(GENERATOR_INITIAL); setSubmitted(false); setSubmitError(""); setSavedId(null); };
+
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  const content = (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
+      <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+        {standalone ? (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#0F0F0F" }}>
+              <ClipboardList size={13} style={{ color: "white" }} />
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>Generator Audit</span>
+          </div>
+        ) : (
+          <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>← Back</button>
+        )}
+        <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+        <button onClick={handleSubmit} disabled={submitting}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+          style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+          {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
+          {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+        {submitted ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+              <CheckCircle2 size={28} style={{ color: "#15803D" }} />
+            </div>
+            <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Report updated" : "Report submitted"}</p>
+            <p className="text-sm mb-5" style={{ color: "#8A7A5C" }}>
+              {submissionId ? "The record has been updated and a new report sent." : `Generator audit submitted${form.recipientEmail ? ` to ${form.recipientEmail}` : ""}.`}
+            </p>
+            {standalone && savedId && (
+              <div className="w-full max-w-sm mx-auto mb-5 p-4 rounded-2xl text-left"
+                style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Use this link to reopen and update this report at any time.</p>
+                <div className="flex gap-2">
+                  <input readOnly value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                    className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                    style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }} />
+                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1 transition-all"
+                    style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                    {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
+            <button onClick={downloadPDF}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+              style={{ background: "#0F4C5C", color: "white" }}>
+              <Download size={14} /> Download PDF copy
+            </button>
+            {standalone && !submissionId && (
+              <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Submit another report</button>
+            )}
+            {!standalone && (
+              <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+            )}
+          </div>
+        ) : (
+          <>
+            {submitError && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>{submitError}</div>
+            )}
+            {!webhookUrl && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#FEF3C7", border: "1px solid rgba(180,83,9,0.2)", color: "#92400E" }}>
+                No webhook configured — submitting will download the PDF locally instead.
+              </div>
+            )}
+
+            <SectionHeader title="Building Details" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Location</div>
+              <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                <option value="">Select building…</option>
+                {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Reference No.</div>
+                {form.building && BUILDING_CODES[form.building] && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                )}
+              </div>
+              <input value={form.incidentRef} onChange={(e) => set("incidentRef", e.target.value)}
+                placeholder="Select a building to generate"
+                className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+            </div>
+
+            <SectionHeader number="1" title="Tenant Generator Information" />
+            {form.tenantRows.map((row, i) => (
+              <div key={i} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8A7A5C" }}>Tenant {i + 1}</p>
+                  {form.tenantRows.length > 1 && (
+                    <button onClick={() => removeTenantRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                  )}
+                </div>
+                <InputRow label="Premises / Unit" value={row.premises} onChange={(v) => updateTenantRow(i, "premises", v)} />
+                <InputRow label="Tenant Name" value={row.tenantName} onChange={(v) => updateTenantRow(i, "tenantName", v)} />
+                <InputRow label="Trading Name" value={row.tradingName} onChange={(v) => updateTenantRow(i, "tradingName", v)} />
+                <YesNoRow label="Generator Installed?" value={row.generatorInstalled} onChange={(v) => updateTenantRow(i, "generatorInstalled", v)} includeNA />
+                <YesNoRow label="Picture of Installation?" value={row.pictureOfInstallation} onChange={(v) => updateTenantRow(i, "pictureOfInstallation", v)} />
+                <YesNoRow label="Is Diesel Stored on Site?" value={row.dieselOnSite} onChange={(v) => updateTenantRow(i, "dieselOnSite", v)} />
+                {row.dieselOnSite === "Yes" && (
+                  <InputRow label="Amount of Diesel Stored" value={row.amountOfDiesel} onChange={(v) => updateTenantRow(i, "amountOfDiesel", v)} placeholder="e.g. 200 L" />
+                )}
+                <YesNoRow label="COC Certificate?" value={row.cocCertificate} onChange={(v) => updateTenantRow(i, "cocCertificate", v)} includeNA />
+              </div>
+            ))}
+            <button onClick={addTenantRow}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold mb-4 transition-all active:scale-[0.98]"
+              style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
+              <Plus size={14} /> Add Tenant
+            </button>
+
+            <SectionHeader number="2" title="Generator for Centre" />
+            {form.centreGenerators.map((row, i) => (
+              <div key={i} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8A7A5C" }}>Generator {i + 1}</p>
+                  {form.centreGenerators.length > 1 && (
+                    <button onClick={() => removeCentreRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                  )}
+                </div>
+                <InputRow label="Type" value={row.type} onChange={(v) => updateCentreRow(i, "type", v)} placeholder="e.g. Diesel" />
+                <InputRow label="Size / kVA" value={row.size} onChange={(v) => updateCentreRow(i, "size", v)} placeholder="e.g. 100 kVA" />
+                <InputRow label="Serial Numbers" value={row.serialNumbers} onChange={(v) => updateCentreRow(i, "serialNumbers", v)} />
+                <InputRow label="Amount of Diesel Stored" value={row.amountOfDiesel} onChange={(v) => updateCentreRow(i, "amountOfDiesel", v)} placeholder="e.g. 500 L" />
+                <TextareaRow label="Area and Items Generator Covers" value={row.areaCovered} onChange={(v) => updateCentreRow(i, "areaCovered", v)} rows={2} placeholder="e.g. Common areas, fire systems, lifts…" />
+              </div>
+            ))}
+            <button onClick={addCentreRow}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold mb-4 transition-all active:scale-[0.98]"
+              style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
+              <Plus size={14} /> Add Generator
+            </button>
+
+            <SectionHeader title="Send Report To" />
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  if (standalone) return content;
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      {content}
+    </div>
+  );
+}
+
 function ChecklistDashboard({ webhookUrl, onClose }) {
   const [activeId, setActiveId] = useState(null);
   const [editingSubmission, setEditingSubmission] = useState(null);
@@ -2743,6 +3070,24 @@ function TextareaRow({ label, value, onChange, placeholder = "", rows = 3 }) {
       <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
       <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows}
         className="w-full bg-transparent outline-none text-sm resize-none" style={{ color: "#0F0F0F" }} />
+    </div>
+  );
+}
+
+function YesNoRow({ label, value, onChange, includeNA = false }) {
+  const opts = includeNA ? ["Yes", "No", "N/A"] : ["Yes", "No"];
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <div className="flex gap-2">
+        {opts.map((opt) => (
+          <button key={opt} type="button" onClick={() => onChange(value === opt ? "" : opt)}
+            className="flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all active:scale-[0.98]"
+            style={{ background: value === opt ? "#0F4C5C" : "#F0EBE0", color: value === opt ? "white" : "#3F3A2E" }}>
+            {opt}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
