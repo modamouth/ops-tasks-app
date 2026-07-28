@@ -717,6 +717,7 @@ const bucketByArchivedMonth = (tasks, archivedAtMap) => {
 };
 
 const CHECKLIST_ID = new URLSearchParams(window.location.search).get("checklist");
+const EDIT_ID = new URLSearchParams(window.location.search).get("edit");
 
 // Registry — add future checklists here
 const CHECKLIST_REGISTRY = [
@@ -729,11 +730,73 @@ const CHECKLIST_REGISTRY = [
   },
 ];
 
+// ---------- Standalone edit page (loaded via ?edit=<uuid>) ----------
+function StandaloneEditPage({ submissionId }) {
+  const [submission, setSubmission] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("checklist_submissions")
+      .select("*")
+      .eq("id", submissionId)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) setNotFound(true);
+        else setSubmission(data);
+        setLoading(false);
+      });
+  }, [submissionId]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-screen">
+      <Loader2 size={24} className="animate-spin" style={{ color: "#8A7A5C" }} />
+    </div>
+  );
+
+  if (notFound) return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center">
+      <p className="font-display text-2xl mb-2" style={{ color: "#0F0F0F" }}>Report not found</p>
+      <p className="text-sm" style={{ color: "#8A7A5C" }}>This link may be invalid or the report has been removed.</p>
+    </div>
+  );
+
+  const entry = CHECKLIST_REGISTRY.find((c) => c.id === submission.checklist_id);
+  if (!entry) return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center">
+      <p className="font-display text-2xl mb-2" style={{ color: "#0F0F0F" }}>Unknown checklist type</p>
+    </div>
+  );
+
+  return (
+    <entry.FormComponent
+      webhookUrl={ENV_WEBHOOK_URL}
+      standalone
+      name={entry.name}
+      initialData={submission.form_data}
+      submissionId={submission.id}
+      onSave={async (formData, fileName, existingId) => {
+        await supabase.from("checklist_submissions").update({
+          form_data: formData,
+          pdf_file_name: fileName,
+          incident_ref: formData.incidentRef,
+          building: formData.building,
+          lift_id: formData.liftId,
+          date_of_failure: formData.dateOfFailure,
+          submitted_at: new Date().toISOString(),
+        }).eq("id", existingId);
+        return existingId;
+      }}
+    />
+  );
+}
+
 // ---------- Main ----------
 export default function App() {
   // Standalone public checklist — no auth, no task board
-  if (CHECKLIST_ID) {
-    const entry = CHECKLIST_REGISTRY.find((c) => c.id === CHECKLIST_ID);
+  if (CHECKLIST_ID || EDIT_ID) {
+    const entry = CHECKLIST_ID ? CHECKLIST_REGISTRY.find((c) => c.id === CHECKLIST_ID) : null;
     return (
       <div className="min-h-screen w-full" style={{ background: "#FAF6EE" }}>
         <style>{`
@@ -741,8 +804,31 @@ export default function App() {
           .scrollbar-hide::-webkit-scrollbar { display: none; }
           .scrollbar-hide { scrollbar-width: none; }
         `}</style>
-        {entry ? (
-          <entry.FormComponent webhookUrl={ENV_WEBHOOK_URL} standalone name={entry.name} />
+        {EDIT_ID ? (
+          <StandaloneEditPage submissionId={EDIT_ID} />
+        ) : entry ? (
+          <entry.FormComponent
+            webhookUrl={ENV_WEBHOOK_URL}
+            standalone
+            name={entry.name}
+            onSave={async (formData, fileName) => {
+              const { data } = await supabase
+                .from("checklist_submissions")
+                .insert({
+                  checklist_id: entry.id,
+                  incident_ref: formData.incidentRef,
+                  building: formData.building,
+                  lift_id: formData.liftId,
+                  date_of_failure: formData.dateOfFailure,
+                  submitted_at: new Date().toISOString(),
+                  pdf_file_name: fileName,
+                  form_data: formData,
+                })
+                .select("id")
+                .single();
+              return data?.id || null;
+            }}
+          />
         ) : (
           <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center">
             <p className="font-display text-2xl mb-2" style={{ color: "#0F0F0F" }}>Checklist not found</p>
@@ -2689,6 +2775,8 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -2733,6 +2821,17 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
       const fileName = `lift-rca-${finalForm.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
       const doc = generateChecklistPDF(finalForm);
       const pdfBase64 = doc.output("datauristring");
+
+      // Standalone new: save to Supabase first so the edit link can be included in the email
+      let resolvedId = submissionId;
+      if (standalone && !submissionId && onSave) {
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId
+        ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}`
+        : null;
+
       if (webhookUrl) {
         const res = await fetch(webhookUrl, {
           method: "POST",
@@ -2748,14 +2847,22 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
             formData: finalForm,
             pdfBase64,
             pdfFileName: fileName,
+            editLink,
           }),
         });
         if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
       } else {
         doc.save(fileName);
       }
+
+      // Internal or standalone edit: save after webhook
+      if (onSave && !(standalone && !submissionId)) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
       setSubmitted(true);
-      if (onSave) onSave(finalForm, fileName, submissionId);
     } catch (e) {
       setSubmitError(e.message || "Submission failed — please try again.");
     } finally {
@@ -2763,7 +2870,7 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
     }
   };
 
-  const resetForm = () => { setForm(CHECKLIST_INITIAL); setSubmitted(false); setSubmitError(""); };
+  const resetForm = () => { setForm(CHECKLIST_INITIAL); setSubmitted(false); setSubmitError(""); setSavedId(null); };
 
   const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
   const content = (
@@ -2799,19 +2906,53 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
                 <CheckCircle2 size={28} style={{ color: "#15803D" }} />
               </div>
               <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Report updated" : "Report submitted"}</p>
-              <p className="text-sm mb-6" style={{ color: "#8A7A5C" }}>
+              <p className="text-sm mb-5" style={{ color: "#8A7A5C" }}>
                 {submissionId
                   ? "The record has been updated and a new report sent."
                   : `The completed RCA report has been sent${form.recipientEmail ? ` to ${form.recipientEmail}` : ""} via your webhook.`}
               </p>
+              {standalone && savedId && (
+                <div className="w-full max-w-sm mx-auto mb-5 p-4 rounded-2xl text-left"
+                  style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                  <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                  <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>
+                    Use this link to reopen and update this report at any time.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      readOnly
+                      value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                      className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                      style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`);
+                        setLinkCopied(true);
+                        setTimeout(() => setLinkCopied(false), 2000);
+                      }}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1 transition-all"
+                      style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                      {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                    </button>
+                  </div>
+                </div>
+              )}
               <button onClick={downloadPDF}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
                 style={{ background: "#0F4C5C", color: "white" }}>
                 <Download size={14} /> Download PDF copy
               </button>
-              <button onClick={standalone ? resetForm : onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
-                {standalone ? "Submit another report" : "Close"}
-              </button>
+              {standalone && !submissionId && (
+                <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
+                  Submit another report
+                </button>
+              )}
+              {!standalone && (
+                <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
+                  Close
+                </button>
+              )}
             </div>
           ) : (
             <>
