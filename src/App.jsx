@@ -5,7 +5,7 @@ import {
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
   Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
-  ClipboardList, Send,
+  ClipboardList, Send, Archive,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -2352,6 +2352,7 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   const fetchSubmissions = useCallback(async () => {
     setLoading(true);
@@ -2404,6 +2405,11 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
     setEditingSubmission(null);
   };
 
+  const archiveSubmission = async (id, archive) => {
+    setSubmissions((prev) => prev.map((s) => s.id === id ? { ...s, archived: archive } : s));
+    await supabase.from("checklist_submissions").update({ archived: archive }).eq("id", id);
+  };
+
   const redownload = (sub) => {
     const fileName = sub.pdf_file_name || `lift-rca-${sub.incident_ref || "report"}.pdf`;
     generateChecklistPDF(sub.form_data).save(fileName);
@@ -2446,7 +2452,7 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
 
         {/* Tabs */}
         <div className="flex px-4 pt-3 pb-1 gap-2">
-          {[["checklists", "Checklists"], ["submissions", `Submissions${submissions.length ? ` (${submissions.length})` : ""}`]].map(([key, label]) => (
+          {[["checklists", "Checklists"], ["submissions", `Submissions${submissions.filter(s => !s.archived).length ? ` (${submissions.filter(s => !s.archived).length})` : ""}`]].map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)}
               className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
               style={{ background: tab === key ? "#0F0F0F" : "white", color: tab === key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
@@ -2502,54 +2508,94 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
                 <p className="text-sm mb-3" style={{ color: "#B91C1C" }}>{loadError}</p>
                 <button onClick={fetchSubmissions} className="text-xs font-semibold" style={{ color: "#8A7A5C" }}>Try again</button>
               </div>
-            ) : submissions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
-                  <ClipboardList size={20} style={{ color: "#8A7A5C" }} />
-                </div>
-                <p className="font-display text-base mb-1" style={{ color: "#0F0F0F" }}>No submissions yet</p>
-                <p className="text-xs" style={{ color: "#8A7A5C" }}>Submitted forms will appear here.</p>
-              </div>
             ) : (
-              submissions.map((sub) => {
-                const entryName = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id)?.name || sub.checklist_id;
-                return (
-                  <div key={sub.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm" style={{ color: "#0F0F0F" }}>
-                          {sub.building || "—"}{sub.lift_id ? ` · ${sub.lift_id}` : ""}
-                        </p>
-                        {sub.incident_ref && (
-                          <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Ref: {sub.incident_ref}</p>
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs" style={{ color: "#8A7A5C" }}>
+                    {showArchived ? "Archived submissions" : `${submissions.filter(s => !s.archived).length} active`}
+                  </p>
+                  <button onClick={() => setShowArchived(!showArchived)}
+                    className="text-xs font-semibold flex items-center gap-1"
+                    style={{ color: showArchived ? "#0F4C5C" : "#8A7A5C" }}>
+                    <Archive size={11} />
+                    {showArchived ? "View active" : "View archived"}
+                  </button>
+                </div>
+                {submissions.filter(s => showArchived ? s.archived : !s.archived).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                      {showArchived ? <Archive size={20} style={{ color: "#8A7A5C" }} /> : <ClipboardList size={20} style={{ color: "#8A7A5C" }} />}
+                    </div>
+                    <p className="font-display text-base mb-1" style={{ color: "#0F0F0F" }}>
+                      {showArchived ? "No archived submissions" : "No submissions yet"}
+                    </p>
+                    <p className="text-xs" style={{ color: "#8A7A5C" }}>
+                      {showArchived ? "Archived reports will appear here." : "Submitted forms will appear here."}
+                    </p>
+                  </div>
+                ) : (
+                  submissions.filter(s => showArchived ? s.archived : !s.archived).map((sub) => {
+                    const entryName = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id)?.name || sub.checklist_id;
+                    return (
+                      <div key={sub.id} className="rounded-2xl p-4 mb-3" style={{ background: showArchived ? "#F7F4EE" : "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm" style={{ color: showArchived ? "#8A7A5C" : "#0F0F0F" }}>
+                              {sub.building || "—"}{sub.lift_id ? ` · ${sub.lift_id}` : ""}
+                            </p>
+                            {sub.incident_ref && (
+                              <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Ref: {sub.incident_ref}</p>
+                            )}
+                          </div>
+                          <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+                            {entryName.split(" ")[0]}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: "#8A7A5C" }}>
+                          {sub.date_of_failure && <span>Failure: {sub.date_of_failure}</span>}
+                          <span>Submitted: {fmtSubmittedAt(sub.submitted_at)}</span>
+                        </div>
+                        {sub.form_data?.recipientEmail && (
+                          <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.form_data.recipientEmail}</p>
+                        )}
+                        {showArchived ? (
+                          <div className="flex gap-2">
+                            <button onClick={() => redownload(sub)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+                              <Download size={13} /> Download PDF
+                            </button>
+                            <button onClick={() => archiveSubmission(sub.id, false)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)" }}>
+                              Unarchive
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <button onClick={() => redownload(sub)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+                              <Download size={13} /> Download PDF
+                            </button>
+                            <button onClick={() => setEditingSubmission(sub)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)" }}>
+                              Edit
+                            </button>
+                            <button onClick={() => archiveSubmission(sub.id, true)}
+                              className="flex items-center justify-center px-3 py-2 rounded-xl transition-all active:scale-[0.98]"
+                              style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)" }}
+                              title="Archive">
+                              <Archive size={14} style={{ color: "#8A7A5C" }} />
+                            </button>
+                          </div>
                         )}
                       </div>
-                      <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
-                        {entryName.split(" ")[0]}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: "#8A7A5C" }}>
-                      {sub.date_of_failure && <span>Failure: {sub.date_of_failure}</span>}
-                      <span>Submitted: {fmtSubmittedAt(sub.submitted_at)}</span>
-                    </div>
-                    {sub.form_data?.recipientEmail && (
-                      <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.form_data.recipientEmail}</p>
-                    )}
-                    <div className="flex gap-2">
-                      <button onClick={() => redownload(sub)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                        style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
-                        <Download size={13} /> Download PDF
-                      </button>
-                      <button onClick={() => setEditingSubmission(sub)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                        style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)" }}>
-                        Edit
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
+                    );
+                  })
+                )}
+              </>
             )}
           </div>
         )}
