@@ -788,6 +788,7 @@ const CHECKLIST_REGISTRY = [
     description: "Root Cause Analysis & Corrective Actions for lift failure incidents",
     category: "Mechanical",
     FormComponent: (props) => <LiftRCASheet {...props} />,
+    generatePDF: generateChecklistPDF,
   },
   {
     id: "generator-info",
@@ -795,6 +796,7 @@ const CHECKLIST_REGISTRY = [
     description: "Tenant and centre generator audit: installation, diesel storage, and COC certificates",
     category: "Electrical",
     FormComponent: (props) => <GeneratorSheet {...props} />,
+    generatePDF: generateGeneratorPDF,
   },
 ];
 
@@ -2613,12 +2615,21 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
           <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>← Back</button>
         )}
         <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
-        <button onClick={handleSubmit} disabled={submitting}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-          style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
-          {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-          {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
-        </button>
+        <div className="flex items-center gap-2">
+          {!submitted && (
+            <button onClick={downloadPDF} title="Download PDF"
+              className="flex items-center justify-center w-8 h-8 rounded-xl transition-all active:scale-95"
+              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <Download size={14} />
+            </button>
+          )}
+          <button onClick={handleSubmit} disabled={submitting}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+            style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
+            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
@@ -2824,8 +2835,9 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
   };
 
   const redownload = (sub) => {
-    const fileName = sub.pdf_file_name || `lift-rca-${sub.incident_ref || "report"}.pdf`;
-    generateChecklistPDF(sub.form_data).save(fileName);
+    const entry = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id);
+    const fileName = sub.pdf_file_name || `${sub.checklist_id || "report"}-${sub.incident_ref || "report"}.pdf`;
+    (entry?.generatePDF || generateChecklistPDF)(sub.form_data).save(fileName);
   };
 
   const fmtSubmittedAt = (iso) => {
