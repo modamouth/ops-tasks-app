@@ -628,90 +628,355 @@ const generateChecklistPDF = (form) => {
 };
 
 const generateGeneratorPDF = (form) => {
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
-  const m = 14;
+  const pageH = doc.internal.pageSize.getHeight();
+  const m = 15;
+  const cW = pageW - m * 2;
+  let y = m;
 
+  const checkY = (needed = 20) => {
+    if (y + needed > pageH - m) { doc.addPage(); y = m; }
+  };
+
+  const sectionTitle = (title) => {
+    checkY(12);
+    doc.setFillColor(15, 15, 15);
+    doc.rect(m, y, cW, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, m + 3, y + 5);
+    doc.setTextColor(15, 15, 15);
+    y += 10;
+  };
+
+  // Title block
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.text("Generator Information", pageW / 2, 16, { align: "center" });
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(138, 122, 92);
-  doc.text(form.building || "", pageW / 2, 23, { align: "center" });
+  doc.setFontSize(13);
   doc.setTextColor(15, 15, 15);
+  doc.text("Generator Information Audit", m, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(138, 122, 92);
+  doc.text("Tenant & Centre Generator Audit: Installation, Diesel Storage & COC Certificates", m, y);
+  y += 4;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(m, y, m + cW, y);
+  doc.setTextColor(15, 15, 15);
+  y += 6;
 
+  // Header details table
   autoTable(doc, {
-    startY: 28,
+    startY: y,
     margin: { left: m, right: m },
-    head: [["Premises / Unit", "Tenant Name", "Trading Name", "Generator\nInstalled", "Picture of\nInstallation", "Diesel\non Site", "Amount of\nDiesel Stored", "COC\nCertificate"]],
-    body: form.tenantRows.map((r) => [
-      r.premises || "", r.tenantName || "", r.tradingName || "",
-      r.generatorInstalled || "", r.pictureOfInstallation || "",
-      r.dieselOnSite || "", r.dieselOnSite === "Yes" ? (r.amountOfDiesel || "") : "—",
-      r.cocCertificate || "",
-    ]),
-    headStyles: { fillColor: [15, 15, 15], textColor: 255, fontStyle: "bold", fontSize: 8 },
-    bodyStyles: { fontSize: 8, textColor: [15, 15, 15], minCellHeight: 10 },
-    columnStyles: { 0: { cellWidth: 28 }, 1: { cellWidth: 34 }, 2: { cellWidth: 34 }, 3: { cellWidth: 22 }, 4: { cellWidth: 22 }, 5: { cellWidth: 20 }, 6: { cellWidth: 28 }, 7: { cellWidth: 22 } },
+    head: [["Report Details", ""]],
+    body: [
+      ["Building / Location", form.building || "—"],
+      ["Incident Reference No.", form.incidentRef || "—"],
+      ["Recipient Email", form.recipientEmail || "—"],
+    ],
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 70 } },
     alternateRowStyles: { fillColor: [250, 246, 238] },
   });
+  y = doc.lastAutoTable.finalY + 8;
 
-  const y2 = doc.lastAutoTable.finalY + 8;
-  doc.setFillColor(240, 140, 60);
-  doc.rect(m, y2, pageW - m * 2, 7, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.setTextColor(255, 255, 255);
-  doc.text("Generator for Centre", m + 3, y2 + 5);
-  doc.setTextColor(15, 15, 15);
-
+  // Tenant generators section
+  sectionTitle("1. Tenant Generator Information");
   autoTable(doc, {
-    startY: y2 + 9,
+    startY: y,
     margin: { left: m, right: m },
-    head: [["Type", "Size / kVA", "Serial Numbers", "Amount of Diesel Stored", "Area and Items Generator Covers"]],
-    body: form.centreGenerators.map((r) => [r.type || "", r.size || "", r.serialNumbers || "", r.amountOfDiesel || "", r.areaCovered || ""]),
-    headStyles: { fillColor: [240, 140, 60], textColor: 255, fontStyle: "bold", fontSize: 8 },
-    bodyStyles: { fontSize: 8, textColor: [15, 15, 15], minCellHeight: 10 },
-    columnStyles: { 0: { cellWidth: 30 }, 1: { cellWidth: 28 }, 2: { cellWidth: 50 }, 3: { cellWidth: 40 } },
-    alternateRowStyles: { fillColor: [255, 243, 230] },
+    head: [["Premises / Unit", "Tenant Name", "Trading Name", "Generator\nInstalled", "Photo of\nInstallation", "Diesel\non Site", "Diesel\nAmount", "COC\nCert."]],
+    body: form.tenantRows.map((r) => [
+      r.premises || "—",
+      r.tenantName || "—",
+      r.tradingName || "—",
+      r.generatorInstalled || "—",
+      r.pictureOfInstallation || "—",
+      r.dieselOnSite || "—",
+      r.dieselOnSite === "Yes" ? (r.amountOfDiesel || "—") : "—",
+      r.cocCertificate || "—",
+    ]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 24 },
+      1: { cellWidth: 28 },
+      2: { cellWidth: 28 },
+      3: { cellWidth: 18 },
+      4: { cellWidth: 18 },
+      5: { cellWidth: 15 },
+      6: { cellWidth: 18 },
+      7: { cellWidth: 15 },
+    },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
   });
+  y = doc.lastAutoTable.finalY + 8;
 
+  // Centre generators section
+  sectionTitle("2. Generator for Centre");
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Type", "Size / kVA", "Serial Numbers", "Diesel Stored", "Area / Items Covered"]],
+    body: form.centreGenerators.map((r) => [
+      r.type || "—",
+      r.size || "—",
+      r.serialNumbers || "—",
+      r.amountOfDiesel || "—",
+      r.areaCovered || "—",
+    ]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 28 },
+      1: { cellWidth: 24 },
+      2: { cellWidth: 44 },
+      3: { cellWidth: 30 },
+    },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  // Incident ref footer
   if (form.incidentRef) {
-    const yRef = doc.lastAutoTable.finalY + 6;
+    checkY(8);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(138, 122, 92);
-    doc.text(`Ref: ${form.incidentRef}`, m, yRef);
+    doc.text(`Ref: ${form.incidentRef}`, m, y);
+    doc.setTextColor(15, 15, 15);
   }
 
-  // Installation photos — one per page
+  // Installation photos — one per page (portrait)
   const photoRows = (form.tenantRows || []).filter((r) => r.pictureOfInstallation === "Yes" && r.installationPhoto);
   if (photoRows.length > 0) {
-    const pageH = doc.internal.pageSize.getHeight();
     photoRows.forEach((row) => {
       doc.addPage();
+      let py = m;
+      doc.setFillColor(15, 15, 15);
+      doc.rect(m, py, cW, 7, "F");
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.text("Installation Photo", m + 3, py + 5);
       doc.setTextColor(15, 15, 15);
-      doc.text("Installation Photo", m, 14);
+      py += 10;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.setTextColor(138, 122, 92);
       const label = [row.premises, row.tenantName, row.tradingName].filter(Boolean).join(" · ");
-      doc.text(label || "Tenant", m, 21);
+      doc.text(label || "Tenant", m, py);
       doc.setTextColor(15, 15, 15);
-      const maxW = pageW - m * 2;
-      const maxH = pageH - 32;
-      // Fit image proportionally
+      py += 6;
+      const maxW = cW;
+      const maxH = pageH - py - m;
       const img = new Image();
       img.src = row.installationPhoto;
       const iW = img.naturalWidth || 1200;
       const iH = img.naturalHeight || 900;
       const ratio = Math.min(maxW / iW, maxH / iH);
-      doc.addImage(row.installationPhoto, "JPEG", m, 26, iW * ratio, iH * ratio);
+      doc.addImage(row.installationPhoto, "JPEG", m, py, iW * ratio, iH * ratio);
     });
   }
+
+  return doc;
+};
+
+const BCA_SECTIONS = [
+  { key: "siteExterior", title: "1. Site & Exterior", items: [
+    "Paving, parking areas & driveways",
+    "Boundary walls, fencing & gates",
+    "Stormwater drainage & site grading",
+    "Landscaping & retaining structures",
+    "Site lighting",
+    "Signage",
+    "Refuse/waste enclosures",
+  ]},
+  { key: "structural", title: "2. Structural", items: [
+    "Foundations",
+    "Columns & load-bearing walls",
+    "Floor slabs / structural floors",
+    "Roof structure & trusses",
+    "Beams & lintels",
+    "Visible cracking, corrosion or deflection",
+  ]},
+  { key: "buildingEnvelope", title: "3. Building Envelope", items: [
+    "Roof covering & waterproofing",
+    "Gutters, downpipes & flashing",
+    "External walls / cladding / render",
+    "Windows & external doors",
+    "Sealants & expansion joints",
+    "Damp-proofing / rising damp evidence",
+  ]},
+  { key: "electrical", title: "4. Electrical", items: [
+    "Main distribution board(s) & sub-boards",
+    "Reticulation / wiring condition",
+    "Lighting (internal & external)",
+    "Standby generator / UPS",
+    "Earthing & lightning protection",
+    "Metering",
+  ]},
+  { key: "mechanical", title: "5. Mechanical / HVAC", items: [
+    "Air-conditioning units (split/central)",
+    "Ventilation & extraction systems",
+    "Ducting & insulation",
+    "Boilers / geysers / hot water systems",
+  ]},
+  { key: "plumbing", title: "6. Plumbing & Drainage", items: [
+    "Water supply reticulation & pressure",
+    "Sanitary drainage & sewer lines",
+    "Sanitary fittings & fixtures",
+    "Water storage tanks & pumps",
+    "Stormwater / roof drainage connections",
+  ]},
+  { key: "fire", title: "7. Fire & Life Safety", items: [
+    "Fire detection & alarm system",
+    "Fire extinguishers & hose reels",
+    "Sprinkler system",
+    "Emergency lighting & signage",
+    "Fire escape routes & doors",
+    "Fire pump & fire water storage",
+  ]},
+  { key: "verticalTransport", title: "8. Vertical Transportation", items: [
+    "Passenger lifts",
+    "Goods lifts",
+    "Escalators",
+    "Stairs & handrails",
+  ]},
+  { key: "interiorFinishes", title: "9. Interior Finishes", items: [
+    "Floor finishes",
+    "Wall finishes / partitions",
+    "Ceilings",
+    "Internal doors & ironmongery",
+    "Ablutions / kitchenettes",
+  ]},
+  { key: "accessibility", title: "10. Accessibility & Compliance", items: [
+    "Ramps & accessible entrances",
+    "Accessible parking & ablutions",
+    "Occupational health & safety compliance",
+    "Statutory certificates / COCs on file",
+  ]},
+];
+
+const generateBCAPDF = (form) => {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const m = 15;
+  const cW = pageW - m * 2;
+  let y = m;
+
+  const checkY = (needed = 20) => {
+    if (y + needed > pageH - m) { doc.addPage(); y = m; }
+  };
+
+  const sectionTitle = (title) => {
+    checkY(20);
+    doc.setFillColor(15, 15, 15);
+    doc.rect(m, y, cW, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, m + 3, y + 5);
+    doc.setTextColor(15, 15, 15);
+    y += 10;
+  };
+
+  // Title block
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(15, 15, 15);
+  doc.text("Building Condition Assessment", m, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(138, 122, 92);
+  doc.text("Site Inspection Checklist", m, y);
+  y += 4;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(m, y, m + cW, y);
+  doc.setTextColor(15, 15, 15);
+  y += 6;
+
+  // Header details
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Inspection Details", ""]],
+    body: [
+      ["Property / Building", form.building || "—"],
+      ["Date of Inspection", form.date || "—"],
+      ["Inspector", form.inspector || "—"],
+      ["Reference No.", form.incidentRef || "—"],
+    ],
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 70 } },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  // Condition / Priority legend
+  checkY(8);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 15, 15);
+  doc.text("Condition:", m, y);
+  doc.setFont("helvetica", "normal");
+  doc.text("G=Good  F=Fair  P=Poor  C=Critical", m + 17, y);
+  doc.setFont("helvetica", "bold");
+  doc.text("Priority:", m + 75, y);
+  doc.setFont("helvetica", "normal");
+  doc.text("1=Immediate (0–12mo)  2=Short-term (1–3yr)  3=Medium-term (3–5yr)  4=Long-term (5–10yr+)", m + 91, y);
+  y += 8;
+
+  // Sections
+  BCA_SECTIONS.forEach((section) => {
+    sectionTitle(section.title);
+    const sectionRows = form.rows?.[section.key] || [];
+    autoTable(doc, {
+      startY: y,
+      margin: { left: m, right: m },
+      head: [["✓", "Item", "Condition", "Priority", "Notes"]],
+      body: section.items.map((item, i) => {
+        const row = sectionRows[i] || {};
+        return [
+          row.inspected ? "✓" : "",
+          item,
+          row.condition || "—",
+          row.priority ? `${row.priority}` : "—",
+          row.notes || "",
+        ];
+      }),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 8, halign: "center", fontStyle: "bold" },
+        1: { cellWidth: 80 },
+        2: { cellWidth: 22, halign: "center" },
+        3: { cellWidth: 20, halign: "center" },
+        4: { cellWidth: 50 },
+      },
+      alternateRowStyles: { fillColor: [250, 246, 238] },
+    });
+    y = doc.lastAutoTable.finalY + 5;
+  });
+
+  // Inspector sign-off
+  sectionTitle("Inspector Sign-off");
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Name", "Signature"]],
+    body: [[form.inspector || "", ""]],
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { cellWidth: 90 }, 1: { cellWidth: 90 } },
+  });
 
   return doc;
 };
@@ -736,7 +1001,7 @@ const BUILDING_CODES = {
   "Windhoek Sanlam Centre": "WSC",
 };
 
-const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA", "generator-info": "GENI" };
+const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA", "generator-info": "GENI", "bca-site": "BCAS" };
 
 const generateIncidentRef = async (building, checklistId) => {
   const code = BUILDING_CODES[building];
@@ -825,6 +1090,14 @@ const CHECKLIST_REGISTRY = [
     category: "Electrical",
     FormComponent: (props) => <GeneratorSheet {...props} />,
     generatePDF: generateGeneratorPDF,
+  },
+  {
+    id: "bca-site",
+    name: "Building Condition Assessment",
+    description: "Site inspection checklist covering structural, electrical, mechanical, fire safety and compliance",
+    category: "General",
+    FormComponent: (props) => <BCASheet {...props} />,
+    generatePDF: generateBCAPDF,
   },
 ];
 
@@ -2785,6 +3058,297 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
 
             <SectionHeader title="Send Report To" />
             <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  if (standalone) return content;
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      {content}
+    </div>
+  );
+}
+
+const BCA_INITIAL = {
+  building: "",
+  incidentRef: "",
+  date: "",
+  inspector: "",
+  rows: Object.fromEntries(BCA_SECTIONS.map((s) => [s.key, s.items.map(() => ({ inspected: false, condition: "", priority: "", notes: "" }))])),
+};
+
+function BCAItemRow({ item, row, onChange }) {
+  const COND = [
+    { v: "G", active: "#15803D" },
+    { v: "F", active: "#A16207" },
+    { v: "P", active: "#C2410C" },
+    { v: "C", active: "#B91C1C" },
+  ];
+  return (
+    <div className="rounded-xl p-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="flex items-start gap-2 mb-2">
+        <button type="button" onClick={() => onChange("inspected", !row.inspected)}
+          className="flex-shrink-0 mt-0.5 w-4 h-4 rounded flex items-center justify-center transition-all"
+          style={{ background: row.inspected ? "#0F4C5C" : "transparent", border: row.inspected ? "none" : "1.5px solid #D1C9B8" }}>
+          {row.inspected && <Check size={10} style={{ color: "white" }} />}
+        </button>
+        <span className="text-sm" style={{ color: "#0F0F0F" }}>{item}</span>
+      </div>
+      <div className="flex items-start gap-3 mb-2">
+        <div className="flex-1">
+          <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Condition</div>
+          <div className="flex gap-1">
+            {COND.map(({ v, active }) => (
+              <button key={v} type="button" onClick={() => onChange("condition", row.condition === v ? "" : v)}
+                className="flex-1 py-1 rounded text-xs font-bold transition-all active:scale-95"
+                style={{ background: row.condition === v ? active : "#F0EBE0", color: row.condition === v ? "white" : "#3F3A2E" }}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1">
+          <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Priority</div>
+          <div className="flex gap-1">
+            {["1", "2", "3", "4"].map((p) => (
+              <button key={p} type="button" onClick={() => onChange("priority", row.priority === p ? "" : p)}
+                className="flex-1 py-1 rounded text-xs font-bold transition-all active:scale-95"
+                style={{ background: row.priority === p ? "#0F0F0F" : "#F0EBE0", color: row.priority === p ? "white" : "#3F3A2E" }}>
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <input type="text" value={row.notes || ""} onChange={(e) => onChange("notes", e.target.value)}
+        placeholder="Notes (optional)"
+        className="w-full bg-transparent outline-none text-xs py-1.5 px-1"
+        style={{ color: "#0F0F0F", borderTop: "1px solid rgba(0,0,0,0.06)" }} />
+    </div>
+  );
+}
+
+function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Condition Assessment", onSave, initialData = null, submissionId = null }) {
+  const [form, setForm] = useState(initialData || BCA_INITIAL);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  useEffect(() => {
+    if (submissionId) return;
+    if (form.building) {
+      generateIncidentRef(form.building, "bca-site").then((ref) => set("incidentRef", ref));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
+  const setRow = (sectionKey, idx, field, value) => {
+    setForm((f) => ({
+      ...f,
+      rows: {
+        ...f.rows,
+        [sectionKey]: f.rows[sectionKey].map((r, i) => i === idx ? { ...r, [field]: value } : r),
+      },
+    }));
+  };
+
+  const downloadPDF = () => {
+    const fileName = `bca-${form.incidentRef || form.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateBCAPDF(form).save(fileName);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.building) { setSubmitError("Please select a building."); return; }
+    if (!form.inspector.trim()) { setSubmitError("Please enter the inspector's name."); return; }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "bca-site");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `bca-${finalForm.incidentRef || finalForm.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateBCAPDF(finalForm);
+      const pdfBase64 = doc.output("datauristring");
+
+      let resolvedId = submissionId;
+      if (standalone && !submissionId && onSave) {
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}` : null;
+
+      if (webhookUrl) {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            inspector: finalForm.inspector,
+            date: finalForm.date,
+            formData: finalForm,
+            pdfBase64,
+            pdfFileName: fileName,
+            editLink,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(fileName);
+      }
+
+      if (onSave && !(standalone && !submissionId)) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
+      setSubmitted(true);
+    } catch (e) {
+      setSubmitError(e.message || "Submission failed — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => { setForm(BCA_INITIAL); setSubmitted(false); setSubmitError(""); setSavedId(null); };
+
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  const content = (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
+      <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+        {standalone ? (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#0F0F0F" }}>
+              <ClipboardList size={13} style={{ color: "white" }} />
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>BCA Inspection</span>
+          </div>
+        ) : (
+          <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>← Back</button>
+        )}
+        <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+        <div className="flex items-center gap-2">
+          {!submitted && (
+            <button onClick={downloadPDF} title="Download PDF"
+              className="flex items-center justify-center w-8 h-8 rounded-xl transition-all active:scale-95"
+              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <Download size={14} />
+            </button>
+          )}
+          <button onClick={handleSubmit} disabled={submitting}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+            style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
+            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+        {submitted ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+              <CheckCircle2 size={28} style={{ color: "#15803D" }} />
+            </div>
+            <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Assessment updated" : "Assessment submitted"}</p>
+            <p className="text-sm mb-5" style={{ color: "#8A7A5C" }}>
+              {submissionId ? "The record has been updated." : `BCA submitted for ${form.building || "site"}.`}
+            </p>
+            {standalone && savedId && (
+              <div className="w-full max-w-sm mx-auto mb-5 p-4 rounded-2xl text-left"
+                style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Use this link to reopen and update this assessment at any time.</p>
+                <div className="flex gap-2">
+                  <input readOnly value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                    className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                    style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }} />
+                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1 transition-all"
+                    style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                    {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
+            <button onClick={downloadPDF}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+              style={{ background: "#0F4C5C", color: "white" }}>
+              <Download size={14} /> Download PDF copy
+            </button>
+            {standalone && !submissionId && (
+              <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Submit another assessment</button>
+            )}
+            {!standalone && (
+              <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+            )}
+          </div>
+        ) : (
+          <>
+            {submitError && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>{submitError}</div>
+            )}
+            {!webhookUrl && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#FEF3C7", border: "1px solid rgba(180,83,9,0.2)", color: "#92400E" }}>
+                No webhook configured — submitting will download the PDF locally instead.
+              </div>
+            )}
+
+            <SectionHeader title="Inspection Details" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Property</div>
+              <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                <option value="">Select building…</option>
+                {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <InputRow label="Date of Inspection" value={form.date} onChange={(v) => set("date", v)} type="date" />
+            <InputRow label="Inspector Name" value={form.inspector} onChange={(v) => set("inspector", v)} placeholder="Full name" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Reference No.</div>
+                {form.building && BUILDING_CODES[form.building] && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                )}
+              </div>
+              <input value={form.incidentRef} onChange={(e) => set("incidentRef", e.target.value)}
+                placeholder="Select a building to generate"
+                className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+            </div>
+
+            <div className="mt-3 mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <span className="font-semibold">Legend — </span>
+              Condition: <span className="font-bold" style={{ color: "#15803D" }}>G</span>=Good  <span className="font-bold" style={{ color: "#A16207" }}>F</span>=Fair  <span className="font-bold" style={{ color: "#C2410C" }}>P</span>=Poor  <span className="font-bold" style={{ color: "#B91C1C" }}>C</span>=Critical  ·  Priority: <span className="font-bold">1</span>=Immediate  <span className="font-bold">2</span>=Short-term  <span className="font-bold">3</span>=Medium-term  <span className="font-bold">4</span>=Long-term
+            </div>
+
+            {BCA_SECTIONS.map((section) => (
+              <div key={section.key}>
+                <SectionHeader title={section.title} />
+                {section.items.map((item, i) => (
+                  <BCAItemRow
+                    key={i}
+                    item={item}
+                    row={form.rows[section.key][i]}
+                    onChange={(field, value) => setRow(section.key, i, field, value)}
+                  />
+                ))}
+              </div>
+            ))}
           </>
         )}
       </div>
