@@ -1902,11 +1902,10 @@ function CompletionsChart({ months, assignees, personColor, maxCount }) {
   if (assignees.length === 0 || maxCount === 0) {
     return <p className="text-sm text-center py-8" style={{ color: "#8A7A5C" }}>No completed tasks in this period</p>;
   }
-  const W = 540, H = 160, ML = 28, MB = 22, MR = 8, MT = 8;
+  const W = 520, H = 180, ML = 28, MB = 22, MR = 8, MT = 8;
   const plotW = W - ML - MR, plotH = H - MT - MB;
   const monthW = plotW / months.length;
-  const barW = Math.max(5, Math.min(18, (monthW - 10) / Math.max(assignees.length, 1)));
-  const groupW = barW * assignees.length;
+  const barW = Math.max(8, monthW - 10);
   const gridMax = Math.max(Math.ceil(maxCount / 2) * 2, 2);
   const ticks = [0, Math.round(gridMax / 2), gridMax];
   return (
@@ -1921,20 +1920,25 @@ function CompletionsChart({ months, assignees, personColor, maxCount }) {
         );
       })}
       {months.map((m, mi) => {
-        const groupX = ML + mi * monthW + (monthW - groupW) / 2;
+        const barX = ML + mi * monthW + (monthW - barW) / 2;
+        const segments = [];
+        let stackY = MT + plotH;
+        assignees.forEach((a) => {
+          const count = m.counts[a] || 0;
+          if (count > 0) {
+            const bh = Math.max(2, (count / gridMax) * plotH);
+            stackY -= bh;
+            segments.push({ a, y: stackY, bh });
+          }
+        });
         return (
           <g key={m.key}>
-            {assignees.map((a, ai) => {
-              const count = m.counts[a] || 0;
-              const bh = count > 0 ? Math.max(3, (count / gridMax) * plotH) : 0;
-              return (
-                <rect key={a} x={groupX + ai * barW} y={MT + plotH - bh}
-                  width={Math.max(1, barW - 1.5)} height={bh} rx="2"
-                  fill={personColor[a] || "#888"} opacity={count > 0 ? 1 : 0}
-                />
-              );
-            })}
-            <text x={ML + mi * monthW + monthW / 2} y={H - 4} textAnchor="middle" fontSize="9" fill="#9CA3AF">{m.label}</text>
+            {segments.map(({ a, y: sy, bh }) => (
+              <rect key={a} x={barX} y={sy} width={barW} height={bh} rx="2"
+                fill={personColor[a] || "#888"} />
+            ))}
+            <text x={ML + mi * monthW + monthW / 2} y={H - 4}
+              textAnchor="middle" fontSize="9" fill="#9CA3AF">{m.label}</text>
           </g>
         );
       })}
