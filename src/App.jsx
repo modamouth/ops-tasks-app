@@ -5,7 +5,7 @@ import {
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
   Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
-  ClipboardList, Send, Archive,
+  ClipboardList, Send, Archive, BarChart2,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -1214,6 +1214,201 @@ function StandaloneEditPage({ submissionId }) {
   );
 }
 
+// ---------- Analytics ----------
+const PERSON_PALETTE = ["#0F4C5C","#7C3AED","#EA580C","#0284C7","#BE185D","#15803D","#B45309","#6366F1"];
+
+function StatCard({ label, value, sub, color }) {
+  return (
+    <div className="rounded-xl p-3 flex flex-col gap-0.5" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+      <span className="text-2xl font-bold leading-none" style={{ color }}>{value}</span>
+      {sub && <span className="text-xs font-medium" style={{ color }}>{sub}</span>}
+      <span className="text-xs leading-tight mt-0.5" style={{ color: "#8A7A5C" }}>{label}</span>
+    </div>
+  );
+}
+
+function CompletionsChart({ months, assignees, personColor, maxCount }) {
+  if (assignees.length === 0 || maxCount === 0) {
+    return <p className="text-sm text-center py-8" style={{ color: "#8A7A5C" }}>No completed tasks in this period</p>;
+  }
+  const W = 540, H = 160, ML = 28, MB = 22, MR = 8, MT = 8;
+  const plotW = W - ML - MR, plotH = H - MT - MB;
+  const monthW = plotW / months.length;
+  const barW = Math.max(5, Math.min(18, (monthW - 10) / Math.max(assignees.length, 1)));
+  const groupW = barW * assignees.length;
+  const gridMax = Math.max(Math.ceil(maxCount / 2) * 2, 2);
+  const ticks = [0, Math.round(gridMax / 2), gridMax];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ overflow: "visible" }}>
+      {ticks.map((tick) => {
+        const y = MT + plotH - (tick / gridMax) * plotH;
+        return (
+          <g key={tick}>
+            <line x1={ML} y1={y} x2={W - MR} y2={y} stroke="rgba(0,0,0,0.07)" strokeWidth="1" />
+            <text x={ML - 4} y={y + 4} textAnchor="end" fontSize="9" fill="#9CA3AF">{tick}</text>
+          </g>
+        );
+      })}
+      {months.map((m, mi) => {
+        const groupX = ML + mi * monthW + (monthW - groupW) / 2;
+        return (
+          <g key={m.key}>
+            {assignees.map((a, ai) => {
+              const count = m.counts[a] || 0;
+              const bh = count > 0 ? Math.max(3, (count / gridMax) * plotH) : 0;
+              return (
+                <rect key={a} x={groupX + ai * barW} y={MT + plotH - bh}
+                  width={Math.max(1, barW - 1.5)} height={bh} rx="2"
+                  fill={personColor[a] || "#888"} opacity={count > 0 ? 1 : 0}
+                />
+              );
+            })}
+            <text x={ML + mi * monthW + monthW / 2} y={H - 4} textAnchor="middle" fontSize="9" fill="#9CA3AF">{m.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function OutstandingChart({ data, maxCount, personColor }) {
+  const ROW_H = 36, LABEL_W = 68, COUNT_W = 28;
+  const H = data.length * ROW_H + 4;
+  return (
+    <svg viewBox={`0 0 ${LABEL_W + 400 + COUNT_W} ${H}`} className="w-full">
+      {data.map((row, i) => {
+        const y = i * ROW_H + ROW_H / 2 + 2;
+        const color = personColor[row.assignee] || "#888";
+        const pendingW = (row.pending / maxCount) * 400;
+        const ipW = (row.inProgress / maxCount) * 400;
+        return (
+          <g key={row.assignee}>
+            <text x={LABEL_W - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#374151">{row.assignee.split(" ")[0]}</text>
+            {row.pending > 0 && <rect x={LABEL_W} y={y - 7} width={pendingW} height={13} rx="3" fill={color} opacity="0.95" />}
+            {row.inProgress > 0 && <rect x={LABEL_W + pendingW} y={y - 7} width={ipW} height={13} rx="3" fill={color} opacity="0.4" />}
+            <text x={LABEL_W + pendingW + ipW + 6} y={y + 4} fontSize="10" fill="#6B7280">{row.total}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function AnalyticsView({ tasks, archivedAtMap }) {
+  const now = new Date();
+
+  const assignees = useMemo(
+    () => [...new Set(tasks.map((t) => t.assignee).filter(Boolean))].sort(),
+    [tasks]
+  );
+
+  const personColor = useMemo(
+    () => Object.fromEntries(assignees.map((a, i) => [a, PERSON_PALETTE[i % PERSON_PALETTE.length]])),
+    [assignees]
+  );
+
+  const months = useMemo(() => {
+    return Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+        label: d.toLocaleDateString("en-GB", { month: "short" }),
+        year: d.getFullYear(),
+        month: d.getMonth(),
+      };
+    });
+  }, []);
+
+  const completionsByMonth = useMemo(() => {
+    return months.map((m) => {
+      const counts = {};
+      tasks.forEach((t) => {
+        if (t.status !== "Done" && t.status !== "Archived") return;
+        const raw = archivedAtMap[t.id] || t.dueDate;
+        if (!raw) return;
+        const d = new Date(raw);
+        if (isNaN(d)) return;
+        if (d.getFullYear() === m.year && d.getMonth() === m.month) {
+          const key = t.assignee || "Unassigned";
+          counts[key] = (counts[key] || 0) + 1;
+        }
+      });
+      return { ...m, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) };
+    });
+  }, [tasks, archivedAtMap, months]);
+
+  const outstandingByPerson = useMemo(() => {
+    const data = {};
+    tasks.forEach((t) => {
+      if (t.status !== "Pending" && t.status !== "In Progress") return;
+      const key = t.assignee || "Unassigned";
+      if (!data[key]) data[key] = { pending: 0, inProgress: 0 };
+      if (t.status === "Pending") data[key].pending++;
+      else data[key].inProgress++;
+    });
+    return Object.entries(data)
+      .map(([assignee, v]) => ({ assignee, ...v, total: v.pending + v.inProgress }))
+      .sort((a, b) => b.total - a.total);
+  }, [tasks]);
+
+  const activeAssignees = useMemo(() => {
+    const s = new Set();
+    completionsByMonth.forEach((m) => Object.keys(m.counts).forEach((k) => s.add(k)));
+    outstandingByPerson.forEach((r) => s.add(r.assignee));
+    return [...s].sort();
+  }, [completionsByMonth, outstandingByPerson]);
+
+  const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const thisMonthData = completionsByMonth.find((m) => m.key === thisMonthKey);
+  const completedThisMonth = thisMonthData?.total || 0;
+  const totalOutstanding = outstandingByPerson.reduce((a, r) => a + r.total, 0);
+  const topEntry = thisMonthData ? Object.entries(thisMonthData.counts).sort((a, b) => b[1] - a[1])[0] : null;
+  const maxMonthCount = Math.max(...completionsByMonth.map((m) => m.total), 1);
+  const maxOutstanding = Math.max(...outstandingByPerson.map((r) => r.total), 1);
+
+  return (
+    <div className="px-4 py-4 pb-8">
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <StatCard label="Completed this month" value={completedThisMonth} color="#15803D" />
+        <StatCard label="Outstanding" value={totalOutstanding} color="#B45309" />
+        <StatCard
+          label="Top this month"
+          value={topEntry ? topEntry[0].split(" ")[0] : "—"}
+          sub={topEntry ? `${topEntry[1]} task${topEntry[1] !== 1 ? "s" : ""}` : ""}
+          color="#0F4C5C"
+        />
+      </div>
+
+      <div className="rounded-2xl p-4 mb-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+        <p className="text-sm font-semibold mb-0.5" style={{ color: "#0F0F0F" }}>Completions by Month</p>
+        <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Done & archived tasks — last 6 months</p>
+        <CompletionsChart months={completionsByMonth} assignees={activeAssignees} personColor={personColor} maxCount={maxMonthCount} />
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+          {activeAssignees.map((a) => (
+            <div key={a} className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: personColor[a] || "#888" }} />
+              <span className="text-xs" style={{ color: "#6B7280" }}>{a.split(" ")[0]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl p-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+        <p className="text-sm font-semibold mb-0.5" style={{ color: "#0F0F0F" }}>Outstanding Tasks</p>
+        <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>
+          <span style={{ opacity: 0.9 }}>■</span> Pending &nbsp;
+          <span style={{ opacity: 0.4 }}>■</span> In Progress
+        </p>
+        {outstandingByPerson.length === 0 ? (
+          <p className="text-sm text-center py-6" style={{ color: "#8A7A5C" }}>All caught up — no outstanding tasks</p>
+        ) : (
+          <OutstandingChart data={outstandingByPerson} maxCount={maxOutstanding} personColor={personColor} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------- Main ----------
 export default function App() {
   // Standalone public checklist — no auth, no task board
@@ -1318,6 +1513,7 @@ export default function App() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
+  const [activeView, setActiveView] = useState("tasks");
   const [syncing, setSyncing] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [lastSync, setLastSync] = usePersistedState("ops.lastSync", new Date().toISOString());
@@ -1631,7 +1827,7 @@ export default function App() {
       `}</style>
 
       <div
-        className="app-card relative w-full sm:w-96 lg:w-full bg-white sm:rounded-3xl lg:rounded-none overflow-hidden shadow-2xl lg:shadow-none"
+        className="app-card relative w-full sm:w-96 lg:w-full bg-white sm:rounded-3xl lg:rounded-none overflow-hidden shadow-2xl lg:shadow-none flex flex-col"
         style={{
           height: "100vh", maxHeight: "844px", minHeight: "640px",
           boxShadow: "0 30px 80px -20px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06)",
@@ -1694,14 +1890,30 @@ export default function App() {
           })()}
         </div>
 
-        <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-          {statusChips.map((p) => (
-            <button key={p.key} onClick={() => setActiveStatus(p.key)} className="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all active:scale-95" style={{ background: activeStatus === p.key ? "#0F0F0F" : "white", color: activeStatus === p.key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
-              {p.label}
-              <span className="px-1.5 rounded-full" style={{ fontSize: "10px", background: activeStatus === p.key ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.05)" }}>{counts[p.key] ?? 0}</span>
+        <div className="flex px-4 py-2 gap-1" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          {[{ id: "tasks", label: "Tasks" }, { id: "analytics", label: "Analytics" }].map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setActiveView(v.id)}
+              className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+              style={{ background: activeView === v.id ? "#0F0F0F" : "transparent", color: activeView === v.id ? "white" : "#8A7A5C" }}
+            >
+              {v.id === "analytics" && <BarChart2 size={11} />}
+              {v.label}
             </button>
           ))}
         </div>
+
+        {activeView === "tasks" && (
+          <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+            {statusChips.map((p) => (
+              <button key={p.key} onClick={() => setActiveStatus(p.key)} className="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all active:scale-95" style={{ background: activeStatus === p.key ? "#0F0F0F" : "white", color: activeStatus === p.key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
+                {p.label}
+                <span className="px-1.5 rounded-full" style={{ fontSize: "10px", background: activeStatus === p.key ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.05)" }}>{counts[p.key] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         <SyncBanner
           isOnline={isOnline}
@@ -1710,56 +1922,64 @@ export default function App() {
           syncError={syncError}
         />
 
-        <div className="overflow-y-auto scrollbar-hide" style={{ height: `calc(100% - ${(syncError || !isOnline || pendingCount > 0) ? 312 : 282}px)`, background: "#FAF6EE" }}>
-          {isArchivedView ? (
-            <div className="px-4 py-2.5">
-              <p className="text-xs" style={{ color: "#8A7A5C" }}>
-                {visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
-              </p>
-            </div>
+        <div className="overflow-y-auto flex-1 scrollbar-hide" style={{ background: "#FAF6EE" }}>
+          {activeView === "analytics" ? (
+            <AnalyticsView tasks={tasks} archivedAtMap={archivedAtMap} />
           ) : (
-            <SortGroupBar
-              groupBy={groupBy} setGroupBy={setGroupBy}
-              sortBy={sortBy} setSortBy={setSortBy}
-              count={visibleTasks.length} lastSync={lastSync}
-            />
-          )}
+            <>
+              {isArchivedView ? (
+                <div className="px-4 py-2.5">
+                  <p className="text-xs" style={{ color: "#8A7A5C" }}>
+                    {visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
+                  </p>
+                </div>
+              ) : (
+                <SortGroupBar
+                  groupBy={groupBy} setGroupBy={setGroupBy}
+                  sortBy={sortBy} setSortBy={setSortBy}
+                  count={visibleTasks.length} lastSync={lastSync}
+                />
+              )}
 
-          {visibleTasks.length === 0 ? (
-            <div className="px-6 py-16 text-center">
-              <div className="mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
-                <Inbox size={22} style={{ color: "#8A7A5C" }} />
-              </div>
-              <p className="font-display text-lg" style={{ color: "#0F0F0F" }}>All clear</p>
-              <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>No tasks match these filters.</p>
-            </div>
-          ) : isArchivedView ? (
-            <ArchivedListView
-              tasks={visibleTasks}
-              archivedAtMap={archivedAtMap}
-              onTaskClick={setOpenTask}
-              onAssigneeClick={(name) => setSearch(name)}
-            />
-          ) : groupedTasks ? (
-            <GroupedListView
-              groups={groupedTasks}
-              onTaskClick={setOpenTask}
-              onToggle={(t) => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })}
-            />
-          ) : (
-            <div className="px-4 pb-32 pt-1">
-              <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
-                {visibleTasks.map((t) => (
-                  <TaskRow key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
-                ))}
-              </div>
-            </div>
+              {visibleTasks.length === 0 ? (
+                <div className="px-6 py-16 text-center">
+                  <div className="mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                    <Inbox size={22} style={{ color: "#8A7A5C" }} />
+                  </div>
+                  <p className="font-display text-lg" style={{ color: "#0F0F0F" }}>All clear</p>
+                  <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>No tasks match these filters.</p>
+                </div>
+              ) : isArchivedView ? (
+                <ArchivedListView
+                  tasks={visibleTasks}
+                  archivedAtMap={archivedAtMap}
+                  onTaskClick={setOpenTask}
+                  onAssigneeClick={(name) => setSearch(name)}
+                />
+              ) : groupedTasks ? (
+                <GroupedListView
+                  groups={groupedTasks}
+                  onTaskClick={setOpenTask}
+                  onToggle={(t) => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })}
+                />
+              ) : (
+                <div className="px-4 pb-32 pt-1">
+                  <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+                    {visibleTasks.map((t) => (
+                      <TaskRow key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        <button onClick={() => setNewTaskOpen(true)} className="absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "#0F0F0F", color: "white", boxShadow: "0 10px 30px -5px rgba(0,0,0,0.4)" }}>
-          <Plus size={22} strokeWidth={2.5} />
-        </button>
+        {activeView === "tasks" && (
+          <button onClick={() => setNewTaskOpen(true)} className="absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "#0F0F0F", color: "white", boxShadow: "0 10px 30px -5px rgba(0,0,0,0.4)" }}>
+            <Plus size={22} strokeWidth={2.5} />
+          </button>
+        )}
 
         {openTask && (
           <TaskDetailSheet
