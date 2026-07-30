@@ -3220,11 +3220,19 @@ function BCAItemRow({ item, row, onChange }) {
             ))}
           </div>
         )}
-        <label className="flex items-center gap-1.5 cursor-pointer" style={{ color: "#8A7A5C" }}>
-          <Camera size={12} />
-          <span className="text-xs">{(row.photos || []).length > 0 ? "Add another photo" : "Add photo"}</span>
-          <input type="file" accept="image/*" multiple className="hidden" onChange={addPhoto} />
-        </label>
+        <div className="flex gap-2">
+          <label className="flex items-center gap-1 cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95"
+            style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+            <Camera size={11} /> Camera
+            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={addPhoto} />
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95"
+            style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Gallery
+            <input type="file" accept="image/*" multiple className="hidden" onChange={addPhoto} />
+          </label>
+        </div>
       </div>
     </div>
   );
