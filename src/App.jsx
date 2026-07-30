@@ -1964,6 +1964,38 @@ function OutstandingChart({ data, maxCount, personColor }) {
   );
 }
 
+function BuildingChart({ data }) {
+  if (data.length === 0) return null;
+  const ROW_H = 34, LABEL_W = 88, BAR_AREA = 360, COUNT_W = 28;
+  const maxTotal = Math.max(...data.map((r) => r.total), 1);
+  const H = data.length * ROW_H + 4;
+  const shortName = (p) => {
+    const first = p.split(" ")[0];
+    return first.length > 10 ? first.slice(0, 9) + "…" : first;
+  };
+  return (
+    <svg viewBox={`0 0 ${LABEL_W + BAR_AREA + COUNT_W} ${H}`} className="w-full" style={{ overflow: "visible" }}>
+      {data.map((row, i) => {
+        const y = i * ROW_H + ROW_H / 2 + 2;
+        const doneW = (row.done / maxTotal) * BAR_AREA;
+        const ipW = (row.inProgress / maxTotal) * BAR_AREA;
+        const pendingW = (row.pending / maxTotal) * BAR_AREA;
+        const filled = doneW + ipW + pendingW;
+        return (
+          <g key={row.property}>
+            <text x={LABEL_W - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#374151">{shortName(row.property)}</text>
+            <rect x={LABEL_W} y={y - 7} width={BAR_AREA} height={13} rx="3" fill="rgba(0,0,0,0.04)" />
+            {row.done > 0 && <rect x={LABEL_W} y={y - 7} width={doneW} height={13} rx="2" fill="#15803D" />}
+            {row.inProgress > 0 && <rect x={LABEL_W + doneW} y={y - 7} width={ipW} height={13} rx="2" fill="#1D4ED8" opacity="0.75" />}
+            {row.pending > 0 && <rect x={LABEL_W + doneW + ipW} y={y - 7} width={pendingW} height={13} rx="2" fill="#B45309" opacity="0.75" />}
+            <text x={LABEL_W + filled + 6} y={y + 4} fontSize="10" fill="#6B7280">{row.total}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function AnalyticsView({ tasks, archivedAtMap }) {
   const now = new Date();
 
@@ -2028,6 +2060,20 @@ function AnalyticsView({ tasks, archivedAtMap }) {
     return [...s].sort();
   }, [completionsByMonth, outstandingByPerson]);
 
+  const tasksByBuilding = useMemo(() => {
+    const data = {};
+    tasks.forEach((t) => {
+      const key = t.property || "Unknown";
+      if (!data[key]) data[key] = { done: 0, inProgress: 0, pending: 0 };
+      if (t.status === DONE_STATUS || t.status === ARCHIVED_STATUS) data[key].done++;
+      else if (t.status === "In Progress") data[key].inProgress++;
+      else if (t.status === "Pending") data[key].pending++;
+    });
+    return Object.entries(data)
+      .map(([property, v]) => ({ property, ...v, total: v.done + v.inProgress + v.pending }))
+      .sort((a, b) => b.total - a.total);
+  }, [tasks]);
+
   const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const thisMonthData = completionsByMonth.find((m) => m.key === thisMonthKey);
   const completedThisMonth = thisMonthData?.total || 0;
@@ -2073,6 +2119,20 @@ function AnalyticsView({ tasks, archivedAtMap }) {
           <p className="text-sm text-center py-6" style={{ color: "#8A7A5C" }}>All caught up — no outstanding tasks</p>
         ) : (
           <OutstandingChart data={outstandingByPerson} maxCount={maxOutstanding} personColor={personColor} />
+        )}
+      </div>
+
+      <div className="rounded-2xl p-4 mt-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+        <p className="text-sm font-semibold mb-0.5" style={{ color: "#0F0F0F" }}>Tasks by Building</p>
+        <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>
+          <span style={{ color: "#15803D" }}>■</span> Done{" "}
+          <span className="mx-1" style={{ color: "#1D4ED8", opacity: 0.75 }}>■</span> In Progress{" "}
+          <span className="mx-1" style={{ color: "#B45309", opacity: 0.75 }}>■</span> Pending
+        </p>
+        {tasksByBuilding.length === 0 ? (
+          <p className="text-sm text-center py-6" style={{ color: "#8A7A5C" }}>No task data</p>
+        ) : (
+          <BuildingChart data={tasksByBuilding} />
         )}
       </div>
     </div>
