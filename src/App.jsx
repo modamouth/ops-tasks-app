@@ -2979,7 +2979,7 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
             style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
             {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
+            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : webhookUrl ? "Send via Email" : "Download PDF")}
           </button>
         </div>
       </div>
@@ -3107,8 +3107,21 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
               <Plus size={14} /> Add Generator
             </button>
 
-            <SectionHeader title="Send Report To" />
+            <SectionHeader title="Send Report" />
             <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+            <div className="flex gap-2 mt-2">
+              <button onClick={downloadPDF}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
+                <Download size={14} /> Download PDF
+              </button>
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {submitting ? (submissionId ? "Updating…" : "Sending…") : webhookUrl ? "Send via Email" : "Download PDF"}
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -3446,8 +3459,6 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
               Condition: <span className="font-bold" style={{ color: "#15803D" }}>G</span>=Good  <span className="font-bold" style={{ color: "#A16207" }}>F</span>=Fair  <span className="font-bold" style={{ color: "#C2410C" }}>P</span>=Poor  <span className="font-bold" style={{ color: "#B91C1C" }}>C</span>=Critical  ·  Priority: <span className="font-bold">1</span>=Immediate  <span className="font-bold">2</span>=Short-term  <span className="font-bold">3</span>=Medium-term  <span className="font-bold">4</span>=Long-term
             </div>
 
-            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
-
             {BCA_SECTIONS.map((section) => (
               <div key={section.key}>
                 <SectionHeader title={section.title} />
@@ -3461,6 +3472,22 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
                 ))}
               </div>
             ))}
+
+            <SectionHeader title="Send Report" />
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+            <div className="flex gap-2 mt-2">
+              <button onClick={downloadPDF}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
+                <Download size={14} /> Download PDF
+              </button>
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {submitting ? (submissionId ? "Updating…" : "Sending…") : webhookUrl ? "Send via Email" : "Download PDF"}
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -4009,7 +4036,7 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
             style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
             {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
+            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : webhookUrl ? "Send via Email" : "Download PDF")}
           </button>
         </div>
 
