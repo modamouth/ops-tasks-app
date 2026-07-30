@@ -5,8 +5,9 @@ import {
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
   Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
-  ClipboardList, Send, Archive, BarChart2, Building2, ShieldCheck, Wrench, AlertTriangle, Calendar, RepeatIcon,
+  ClipboardList, Send, Archive, BarChart2, Building2, ShieldCheck, Wrench, AlertTriangle, Calendar, RepeatIcon, LayoutGrid,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { createClient } from "@supabase/supabase-js";
@@ -2636,6 +2637,14 @@ export default function App() {
               {v.label}
             </button>
           ))}
+          <Link
+            to="/buildings"
+            className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+            style={{ color: "#8A7A5C", textDecoration: "none" }}
+          >
+            <LayoutGrid size={11} />
+            Buildings
+          </Link>
         </div>
 
         {activeView === "tasks" && (
