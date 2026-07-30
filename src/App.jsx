@@ -2538,6 +2538,20 @@ export default function App() {
   const pendingCount = pendingQueue.length;
   const isArchivedView = activeStatus === ARCHIVED_STATUS;
 
+  const portfolioStats = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let open = 0, overdue = 0;
+    const buildings = new Set();
+    tasks.forEach((t) => {
+      if (t.status !== "Done" && t.status !== "Archived") {
+        open++;
+        if (t.property) buildings.add(t.property);
+        if (t.dueDate && new Date(t.dueDate + "T00:00:00") < today) overdue++;
+      }
+    });
+    return { open, overdue, buildings: buildings.size };
+  }, [tasks]);
+
   if (!authed) return <LoginScreen onUnlock={tryUnlock} />;
 
   return (
@@ -2670,6 +2684,22 @@ export default function App() {
             <AnalyticsView tasks={tasks} archivedAtMap={archivedAtMap} />
           ) : (
             <>
+              {!isArchivedView && (
+                <Link to="/buildings" style={{ textDecoration: "none", display: "block", padding: "10px 16px 4px" }}>
+                  <div style={{ background: "#0F4C5C", borderRadius: 16, padding: "11px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <LayoutGrid size={15} style={{ color: "white" }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: "white", margin: "0 0 2px" }}>Buildings Portfolio</p>
+                      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", margin: 0 }}>
+                        {portfolioStats.open} open · {portfolioStats.overdue > 0 ? <span style={{ color: "#FCA5A5" }}>{portfolioStats.overdue} overdue · </span> : null}{portfolioStats.buildings} properties
+                      </p>
+                    </div>
+                    <ChevronRight size={14} style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }} />
+                  </div>
+                </Link>
+              )}
               {isArchivedView ? (
                 <div className="px-4 py-2.5">
                   <p className="text-xs" style={{ color: "#8A7A5C" }}>
