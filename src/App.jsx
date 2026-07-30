@@ -3363,7 +3363,7 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
             style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
             {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : "Submit")}
+            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : webhookUrl ? "Send via Email" : "Download PDF")}
           </button>
         </div>
       </div>
