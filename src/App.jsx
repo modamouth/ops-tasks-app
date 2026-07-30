@@ -1180,6 +1180,22 @@ const CHECKLIST_REGISTRY = [
   },
 ];
 
+// Condition points — must stay in sync with HEALTH_SCORE_CONFIG.bca.conditionPoints in ops-tasks-dashboard.jsx
+const BCA_CONDITION_POINTS = { G: 100, F: 75, P: 25, C: 0 };
+
+function computeBCAScoreForSubmission(formData) {
+  let total = 0, count = 0;
+  Object.values(formData?.rows || {}).forEach((section) =>
+    section.forEach((item) => {
+      if (item.inspected && BCA_CONDITION_POINTS[item.condition] !== undefined) {
+        total += BCA_CONDITION_POINTS[item.condition];
+        count++;
+      }
+    })
+  );
+  return count > 0 ? Math.round((total / count) * 10) / 10 : null;
+}
+
 // ---------- Standalone edit page (loaded via ?edit=<uuid>) ----------
 function StandaloneEditPage({ submissionId }) {
   const [submission, setSubmission] = useState(null);
@@ -4586,15 +4602,35 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
   };
 
   const saveSubmission = async (entry, formData, pdfFileName, existingId = null) => {
+    // Resolve building_id so the portfolio health score can query by FK
+    let building_id = null;
+    if (formData.building) {
+      const { data: bRow } = await supabase
+        .from("buildings").select("id").eq("name", formData.building).single();
+      building_id = bRow?.id || null;
+    }
+
+    // Compute BCA condition score at submit time for fast health score reads
+    let score = null, result = "info";
+    if (entry.id === "bca-site") {
+      score = computeBCAScoreForSubmission(formData);
+      if (score != null) {
+        result = score >= 75 ? "pass" : score >= 50 ? "conditional" : "fail";
+      }
+    }
+
     const record = {
-      checklist_id: entry.id,
-      incident_ref: formData.incidentRef,
-      building: formData.building,
-      lift_id: formData.liftId,
+      checklist_id:   entry.id,
+      incident_ref:   formData.incidentRef,
+      building:       formData.building,
+      building_id,
+      lift_id:        formData.liftId,
       date_of_failure: formData.dateOfFailure,
-      submitted_at: new Date().toISOString(),
-      pdf_file_name: pdfFileName,
-      form_data: formData,
+      submitted_at:   new Date().toISOString(),
+      pdf_file_name:  pdfFileName,
+      form_data:      formData,
+      score,
+      result,
     };
     try {
       if (existingId) {

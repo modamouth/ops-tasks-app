@@ -58,6 +58,136 @@ const ASSET_STATUSES = {
   decommissioned: { color: "#6B7280", bg: "#F3F4F6", label: "Decommissioned" },
 };
 
+// ── Health Score ─────────────────────────────────────────────
+// All thresholds, weights, and missing/stale behavior in one place.
+const HEALTH_SCORE_CONFIG = {
+  weights: {
+    taskOnTimeRate: 0.40,   // % open tasks that are not overdue
+    checklistScore: 0.60,   // latest BCA condition rating
+    // assetCondition: 0.00  // TODO: enable when assets have real condition data
+  },
+  bca: {
+    // Condition rating → score (0–100). Keep in sync with App.jsx BCA_CONDITION_POINTS.
+    conditionPoints: { G: 100, F: 75, P: 25, C: 0 },
+    maxAgeMonths:  12,   // BCA older than this is treated as expired
+    missingScore:   0,   // component score when BCA is missing OR expired
+  },
+  tasks: {
+    noTasksScore: 100,   // building with zero open tasks scores full marks here
+  },
+  status: {
+    // health_score → building status label thresholds
+    goodAbove:    75,
+    atRiskAbove:  50,
+    // below atRiskAbove → "critical"
+  },
+};
+
+// Compute a BCA score from raw form_data (used when stored .score is null).
+function computeBCAScoreFromData(formData) {
+  const pts = HEALTH_SCORE_CONFIG.bca.conditionPoints;
+  let total = 0, count = 0;
+  Object.values(formData?.rows || {}).forEach((section) =>
+    section.forEach((item) => {
+      if (item.inspected && pts[item.condition] !== undefined) {
+        total += pts[item.condition];
+        count++;
+      }
+    })
+  );
+  return count > 0 ? Math.round((total / count) * 10) / 10 : null;
+}
+
+// Full health score computation. Returns { score, breakdown }.
+function computeHealthScore(buildingName, submissions, localTasks) {
+  const cfg = HEALTH_SCORE_CONFIG;
+  const today = new Date();
+
+  // ── Task on-time rate ─────────────────────────────────────
+  const openTasks = localTasks.filter(
+    (t) => t.property === buildingName && t.status !== "Done" && t.status !== "Archived"
+  );
+  const overdueCount = openTasks.filter(
+    (t) => t.dueDate && new Date(t.dueDate + "T00:00:00") < today
+  ).length;
+  const taskScore =
+    openTasks.length === 0
+      ? cfg.tasks.noTasksScore
+      : (1 - overdueCount / openTasks.length) * 100;
+  const taskBreakdown = {
+    score:      Math.round(taskScore),
+    openCount:  openTasks.length,
+    overdueCount,
+    status:     openTasks.length === 0 ? "no_tasks" : overdueCount === 0 ? "ok" : "overdue",
+  };
+
+  // ── BCA checklist score ───────────────────────────────────
+  const bcaSubs = (submissions || [])
+    .filter((s) => s.checklist_id === "bca-site")
+    .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+
+  let checklistScore = cfg.bca.missingScore;
+  let bcaBreakdown   = { status: "missing", lastDate: null, lastScore: null };
+
+  if (bcaSubs.length > 0) {
+    const latest    = bcaSubs[0];
+    const ageMonths = (today - new Date(latest.submitted_at)) / (1000 * 60 * 60 * 24 * 30.5);
+    const rawScore  = latest.score ?? computeBCAScoreFromData(latest.form_data);
+
+    if (ageMonths > cfg.bca.maxAgeMonths) {
+      // Stale — use missingScore for the weighted blend but preserve the last reading for display
+      bcaBreakdown = { status: "stale", lastDate: latest.submitted_at, lastScore: rawScore };
+    } else {
+      checklistScore = rawScore ?? cfg.bca.missingScore;
+      bcaBreakdown   = { status: "current", lastDate: latest.submitted_at, lastScore: checklistScore };
+    }
+  }
+
+  // ── Weighted blend ────────────────────────────────────────
+  const w = cfg.weights;
+  const totalWeight = Object.values(w).reduce((s, v) => s + v, 0);
+  const score = Math.round(
+    ((w.taskOnTimeRate * taskScore + w.checklistScore * checklistScore) / totalWeight) * 10
+  ) / 10;
+
+  return { score, breakdown: { task: taskBreakdown, bca: bcaBreakdown } };
+}
+
+// Small score bar + label card used in OverviewTab.
+function ScoreCard({ icon: Icon, label, weight, score, statusText, statusColor = "#8A7A5C", disabled = false }) {
+  const pct      = Math.round(weight * 100);
+  const barColor = disabled || score == null
+    ? "#E5E7EB"
+    : score >= 75 ? "#15803D" : score >= 50 ? "#B45309" : "#B91C1C";
+
+  return (
+    <div style={{ background: "white", borderRadius: 14, padding: "12px 14px", opacity: disabled ? 0.65 : 1 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: disabled ? 4 : 8 }}>
+        <Icon size={13} style={{ color: "#8A7A5C", flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#0F0F0F", flex: 1 }}>{label}</span>
+        {!disabled && score != null && (
+          <span style={{ fontSize: 14, fontWeight: 700, color: barColor, fontVariantNumeric: "tabular-nums" }}>
+            {Math.round(score)}
+          </span>
+        )}
+        <span style={{ fontSize: 10, color: "#9CA3AF" }}>
+          {pct > 0 ? `${pct}% weight` : "—"}
+        </span>
+      </div>
+      {!disabled && (
+        <div style={{ background: "rgba(0,0,0,0.06)", borderRadius: 4, height: 5, marginBottom: 6 }}>
+          <div style={{
+            background: barColor, borderRadius: 4, height: 5,
+            width: `${Math.max(0, Math.min(100, score ?? 0))}%`,
+            transition: "width 0.5s ease",
+          }} />
+        </div>
+      )}
+      <p style={{ fontSize: 11, color: disabled ? "#9CA3AF" : statusColor, margin: 0 }}>{statusText}</p>
+    </div>
+  );
+}
+
 // ── Hooks ────────────────────────────────────────────────────
 function useBuildings() {
   const [buildings, setBuildings] = useState([]);
@@ -65,41 +195,63 @@ function useBuildings() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [bRes, aRes, tRes] = await Promise.all([
+    const [bRes, aRes, tRes, sRes] = await Promise.all([
       supabase.from("buildings").select("*").order("name"),
-      supabase.from("assets").select("id, building_id"),
+      supabase.from("assets").select("id, property_name"),
       supabase.from("tenants").select("id, building_id"),
+      supabase.from("checklist_submissions")
+        .select("id, checklist_id, building, submitted_at, score, form_data")
+        .eq("checklist_id", "bca-site")
+        .or("archived.eq.false,archived.is.null")
+        .order("submitted_at", { ascending: false }),
     ]);
 
     let localTasks = [];
     try { localTasks = JSON.parse(localStorage.getItem("ops.tasks") || "[]"); } catch {}
 
     const today = new Date();
-    const openCounts = {}, overdueCounts = {}, assetCounts = {}, tenantCounts = {};
+    const openCounts = {}, overdueCounts = {}, assetCounts = {}, tenantCounts = {}, bcaByBuilding = {};
 
     localTasks.forEach((t) => {
       if (t.status !== "Done" && t.status !== "Archived") {
         openCounts[t.property] = (openCounts[t.property] || 0) + 1;
-        if (t.dueDate && new Date(t.dueDate) < today)
+        if (t.dueDate && new Date(t.dueDate + "T00:00:00") < today)
           overdueCounts[t.property] = (overdueCounts[t.property] || 0) + 1;
       }
     });
+    // Count by property_name string match — building_id may be null for older assets
     (aRes.data || []).forEach((a) => {
-      if (a.building_id) assetCounts[a.building_id] = (assetCounts[a.building_id] || 0) + 1;
+      if (a.property_name) assetCounts[a.property_name] = (assetCounts[a.property_name] || 0) + 1;
     });
     (tRes.data || []).forEach((t) => {
       if (t.building_id) tenantCounts[t.building_id] = (tenantCounts[t.building_id] || 0) + 1;
     });
+    (sRes.data || []).forEach((s) => {
+      if (!bcaByBuilding[s.building]) bcaByBuilding[s.building] = [];
+      bcaByBuilding[s.building].push(s);
+    });
 
-    setBuildings(
-      (bRes.data || []).map((b) => ({
-        ...b,
-        openTaskCount: openCounts[b.name] || 0,
-        overdueTaskCount: overdueCounts[b.name] || 0,
-        assetCount: assetCounts[b.id] || 0,
-        tenantCount: tenantCounts[b.id] || 0,
-      }))
-    );
+    const enriched = (bRes.data || []).map((b) => ({
+      ...b,
+      openTaskCount:    openCounts[b.name]    || 0,
+      overdueTaskCount: overdueCounts[b.name] || 0,
+      assetCount:       assetCounts[b.name]   || 0,
+      tenantCount:      tenantCounts[b.id]    || 0,
+    }));
+
+    // Back-fill health_score for buildings that have never had one computed
+    const nullBuildings = enriched.filter((b) => b.health_score == null);
+    if (nullBuildings.length > 0) {
+      await Promise.all(
+        nullBuildings.map((b) => {
+          const { score } = computeHealthScore(b.name, bcaByBuilding[b.name] || [], localTasks);
+          b.health_score = score; // update local copy for immediate display
+          return supabase.from("buildings").update({ health_score: score }).eq("id", b.id);
+        })
+      );
+    }
+
+    setBuildings(enriched);
     setLoading(false);
   }, []);
 
@@ -113,23 +265,34 @@ function useBuildingData(id) {
   const [inspections, setInspections] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [tenants, setTenants] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
-    const [bRes, aRes, iRes, dRes, tRes] = await Promise.all([
-      supabase.from("buildings").select("*").eq("id", id).single(),
+
+    // Fetch building first so we can query submissions by name (building_id may be null on older rows)
+    const { data: bData } = await supabase.from("buildings").select("*").eq("id", id).single();
+    setBuilding(bData);
+    if (!bData) { setLoading(false); return; }
+
+    const [aRes, iRes, dRes, tRes, sRes] = await Promise.all([
       supabase.from("assets").select("*").eq("building_id", id).order("name"),
       supabase.from("inspections").select("*").eq("building_id", id).order("scheduled_date", { ascending: false }),
       supabase.from("documents").select("*").eq("building_id", id).order("uploaded_at", { ascending: false }),
       supabase.from("tenants").select("*").eq("building_id", id).order("unit"),
+      supabase.from("checklist_submissions")
+        .select("*")
+        .eq("building", bData.name)
+        .or("archived.eq.false,archived.is.null")
+        .order("submitted_at", { ascending: false }),
     ]);
-    setBuilding(bRes.data);
     setAssets(aRes.data || []);
     setInspections(iRes.data || []);
     setDocuments(dRes.data || []);
     setTenants(tRes.data || []);
+    setSubmissions(sRes.data || []);
     setLoading(false);
   }, [id]);
 
@@ -187,7 +350,7 @@ function useBuildingData(id) {
   }, []);
 
   return {
-    building, assets, inspections, documents, tenants, loading,
+    building, assets, inspections, documents, tenants, submissions, loading,
     reload: load, updateBuilding,
     saveInspection, removeInspection,
     saveDocument, removeDocument,
@@ -458,69 +621,109 @@ function BuildingsPortfolio() {
 }
 
 // ── Building Detail Tabs ─────────────────────────────────────
-function OverviewTab({ building, updateBuilding }) {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ status: building?.status || "operational", health_score: building?.health_score ?? "" });
+function OverviewTab({ building, computedHealth, updateBuilding }) {
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [form, setForm] = useState({ status: building?.status || "operational" });
   const [saving, setSaving] = useState(false);
 
-  const save = async () => {
+  const saveStatus = async () => {
     setSaving(true);
-    await updateBuilding({ status: form.status, health_score: form.health_score === "" ? null : Number(form.health_score) });
+    await updateBuilding({ status: form.status });
     setSaving(false);
-    setEditing(false);
+    setEditingStatus(false);
   };
 
-  const metrics = [
-    { label: "Asset Condition",        icon: Wrench,       value: "—", sub: "% operational", note: "TODO: computed" },
-    { label: "Inspection Compliance",  icon: ClipboardList, value: "—", sub: "on-time rate", note: "TODO: computed" },
-    { label: "Open Findings",          icon: AlertTriangle, value: "—", sub: "fail items",   note: "TODO: computed" },
-    { label: "Vacancy Trend",          icon: Users,         value: "—", sub: "% occupied",   note: "TODO: computed" },
-  ];
+  const W    = HEALTH_SCORE_CONFIG.weights;
+  const score = computedHealth?.score ?? building?.health_score;
+  const { task, bca } = computedHealth?.breakdown || {};
+
+  const taskStatusText = !task
+    ? "Computing…"
+    : task.status === "no_tasks"  ? "No open tasks"
+    : task.status === "ok"        ? `${task.openCount} open · all on time`
+    : `${task.openCount} open · ${task.overdueCount} overdue`;
+
+  const taskStatusColor = !task ? "#9CA3AF"
+    : task.status === "ok" ? "#15803D"
+    : task.overdueCount > 0 ? "#B91C1C" : "#8A7A5C";
+
+  const bcaStatusText = !bca
+    ? "Computing…"
+    : bca.status === "missing"  ? "No BCA on file"
+    : bca.status === "stale"    ? `BCA overdue · last: ${bca.lastDate?.slice(0, 10)}${bca.lastScore != null ? `, scored ${Math.round(bca.lastScore)}` : ""}`
+    : `Current · last BCA: ${bca.lastDate?.slice(0, 10)}`;
+
+  const bcaStatusColor = !bca ? "#9CA3AF"
+    : bca.status === "current" ? "#15803D"
+    : bca.status === "stale"   ? "#B45309" : "#B91C1C";
+
+  const bcaDisplayScore = bca?.status === "current" ? bca.lastScore : null;
 
   return (
     <div style={{ padding: "16px 16px 40px", display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Health score card */}
+
+      {/* Health score summary */}
       <div style={{ background: "white", borderRadius: 16, padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <p style={{ fontSize: 13, fontWeight: 700, color: "#0F0F0F", margin: 0 }}>Health Score</p>
-          <button onClick={() => setEditing(!editing)} style={{ fontSize: 11, color: "#0F4C5C", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>
-            {editing ? "Cancel" : "Edit"}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: editingStatus ? 14 : 0 }}>
+          <HealthBadge score={score} size="lg" />
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 10, color: "#8A7A5C", margin: "0 0 3px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Health Score</p>
+            <StatusChip status={building?.status || "operational"} />
+          </div>
+          <button
+            onClick={() => setEditingStatus(!editingStatus)}
+            style={{ fontSize: 11, color: "#0F4C5C", fontWeight: 600, background: "none", border: "none", cursor: "pointer", flexShrink: 0 }}
+          >
+            {editingStatus ? "Cancel" : "Edit status"}
           </button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <HealthBadge score={building?.health_score} size="lg" />
-          <StatusChip status={building?.status || "operational"} />
-        </div>
-        {editing && (
-          <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-            <Field label="Status">
+        {editingStatus && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <Field label="Building Status">
               <select style={selectStyle} value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}>
                 {Object.entries(BUILDING_STATUSES).map(([k, v]) => (
                   <option key={k} value={k}>{v.label}</option>
                 ))}
               </select>
             </Field>
-            <Field label="Health Score (0–100)">
-              <input style={inputStyle} type="number" min={0} max={100} placeholder="e.g. 72"
-                value={form.health_score} onChange={(e) => setForm((p) => ({ ...p, health_score: e.target.value }))} />
-            </Field>
-            <SaveBtn saving={saving} onClick={save} />
+            <SaveBtn saving={saving} onClick={saveStatus} />
           </div>
         )}
       </div>
 
-      {/* Metric breakdown */}
-      <p style={{ fontSize: 11, fontWeight: 600, color: "#8A7A5C", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>Score breakdown</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        {metrics.map(({ label, icon: Icon, value, sub, note }) => (
-          <div key={label} style={{ background: "white", borderRadius: 14, padding: 12 }}>
-            <Icon size={14} style={{ color: "#8A7A5C", marginBottom: 6 }} />
-            <p style={{ fontSize: 20, fontWeight: 700, color: "#0F0F0F", margin: "0 0 2px" }}>{value}</p>
-            <p style={{ fontSize: 11, color: "#8A7A5C", margin: "0 0 4px" }}>{sub}</p>
-            <p style={{ fontSize: 10, color: "#B45309", margin: 0, fontStyle: "italic" }}>{note}</p>
-          </div>
-        ))}
-      </div>
+      <p style={{ fontSize: 11, fontWeight: 600, color: "#8A7A5C", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>
+        Score breakdown
+      </p>
+
+      {/* Task performance */}
+      <ScoreCard
+        icon={ClipboardList}
+        label="Task Performance"
+        weight={W.taskOnTimeRate}
+        score={task?.score ?? null}
+        statusText={taskStatusText}
+        statusColor={taskStatusColor}
+      />
+
+      {/* BCA checklist */}
+      <ScoreCard
+        icon={CheckCircle2}
+        label="Building Inspections (BCA)"
+        weight={W.checklistScore}
+        score={bcaDisplayScore}
+        statusText={bcaStatusText}
+        statusColor={bcaStatusColor}
+      />
+
+      {/* Asset condition — coming soon */}
+      <ScoreCard
+        icon={Wrench}
+        label="Asset Condition"
+        weight={0}
+        score={null}
+        statusText="Coming soon — add condition data to assets to enable this"
+        disabled
+      />
     </div>
   );
 }
@@ -981,10 +1184,29 @@ function BuildingDetail() {
   const [activeTab, setActiveTab] = useState("overview");
 
   const {
-    building, assets, inspections, documents, tenants, loading,
+    building, assets, inspections, documents, tenants, submissions, loading,
     updateBuilding, saveInspection, removeInspection,
     saveDocument, removeDocument, saveTenant, removeTenant,
   } = useBuildingData(id);
+
+  const localTasks = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("ops.tasks") || "[]"); } catch { return []; }
+  }, []);
+
+  const computedHealth = useMemo(() => {
+    if (!building) return null;
+    return computeHealthScore(building.name, submissions, localTasks);
+  }, [building, submissions, localTasks]);
+
+  // Auto-save fresh score back to the building when it differs by more than 1 point
+  useEffect(() => {
+    if (!building || computedHealth == null) return;
+    const stored = building.health_score;
+    if (stored == null || Math.abs(stored - computedHealth.score) > 1) {
+      updateBuilding({ health_score: computedHealth.score });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedHealth?.score]);
 
   if (loading) {
     return (
@@ -1052,7 +1274,7 @@ function BuildingDetail() {
 
       {/* Tab content */}
       <div style={{ flex: 1, overflowY: "auto" }} className="bd-scrollbar">
-        {activeTab === "overview" && <OverviewTab building={building} updateBuilding={updateBuilding} />}
+        {activeTab === "overview" && <OverviewTab building={building} computedHealth={computedHealth} updateBuilding={updateBuilding} />}
         {activeTab === "tasks" && <TasksTab buildingName={building.name} />}
         {activeTab === "assets" && <AssetsTab assets={assets} />}
         {activeTab === "inspections" && (
