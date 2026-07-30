@@ -40,7 +40,19 @@ const PRIORITIES = {
 };
 const PRIORITY_KEYS = Object.keys(PRIORITIES);
 
-const ASSET_TYPES = ["Lift", "Generator", "HVAC", "Fire System", "Electrical", "Plumbing", "BMS", "Security", "Pest Control", "Other"];
+const ASSET_TYPE_GROUPS = [
+  { group: "Vertical Transportation", types: ["Lift / Elevator", "Escalator", "Travelator"] },
+  { group: "Power & Electrical", types: ["Generator (diesel/petrol)", "Transformer", "Main Distribution Board (MDB)", "UPS System", "Solar/Inverter System", "Electrical Sub-station"] },
+  { group: "Fire & Life Safety", types: ["Fire Hydrant", "Fire Hose Reel", "Fire Extinguisher", "Sprinkler System", "Fire Detection/Alarm Panel", "Emergency Lighting", "Fire Pump"] },
+  { group: "HVAC & Mechanical", types: ["Air Conditioning Unit (split/central)", "Chiller", "Cooling Tower", "Ventilation Fan/Extraction System", "Boiler"] },
+  { group: "Water & Plumbing", types: ["Water Pump", "Borehole", "Water Tank/Reservoir", "Sewage Pump Station", "Backflow Preventer"] },
+  { group: "Security & Access", types: ["CCTV System", "Access Control System", "Boom Gate / Barrier", "Turnstile", "Intercom System"] },
+  { group: "Building Envelope & Structural", types: ["Roof", "Facade/Cladding", "Glazing/Curtain Wall", "Structural (general)"] },
+  { group: "Signage & Wayfinding", types: ["Illuminated Signage", "Digital Signage/Screens"] },
+  { group: "Cleaning & Grounds", types: ["Irrigation System", "Landscaping Equipment", "Refuse/Compactor Equipment"] },
+  { group: "Other", types: ["Parking Equipment (pay stations, gates)", "Loading Dock Equipment", "General/Miscellaneous"] },
+];
+const ASSET_TYPES = ASSET_TYPE_GROUPS.flatMap((g) => g.types);
 const CERT_TYPES = ["COC (Electrical)", "Fire Safety", "Lift Inspection", "Generator Diesel Storage", "Pest Control Certificate", "Building Compliance", "HVAC Service", "Other"];
 
 // Photo upload constraints
@@ -1311,7 +1323,7 @@ function AssetForm({ asset, propertyOptions, onSave, onCancel }) {
   const [form, setForm] = useState({
     property_name: asset.property_name || propertyOptions[0] || "",
     name: asset.name || "",
-    asset_type: asset.asset_type || ASSET_TYPES[0],
+    asset_type: asset.asset_type || ASSET_TYPE_GROUPS[0].types[0],
     manufacturer: asset.manufacturer || "",
     model: asset.model || "",
     serial_number: asset.serial_number || "",
@@ -1359,7 +1371,11 @@ function AssetForm({ asset, propertyOptions, onSave, onCancel }) {
         <div className="mb-3">
           <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Asset Type</p>
           <select value={form.asset_type} onChange={(e) => set("asset_type", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
-            {ASSET_TYPES.map((t) => <option key={t}>{t}</option>)}
+            {ASSET_TYPE_GROUPS.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {g.types.map((t) => <option key={t} value={t}>{t}</option>)}
+              </optgroup>
+            ))}
           </select>
         </div>
         <div className="mb-3">
