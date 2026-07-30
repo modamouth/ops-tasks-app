@@ -5,7 +5,7 @@ import {
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
   Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
-  ClipboardList, Send, Archive, BarChart2, Building2, ShieldCheck, Wrench, AlertTriangle,
+  ClipboardList, Send, Archive, BarChart2, Building2, ShieldCheck, Wrench, AlertTriangle, Calendar, RepeatIcon,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -1301,6 +1301,44 @@ function useCertificates() {
   return { certs, loading, load, save, remove };
 }
 
+const PM_FREQUENCY_UNITS = ["days", "weeks", "months", "years"];
+
+function usePMSchedules() {
+  const [schedules, setSchedules] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase
+        .from("pm_schedules")
+        .select("*, assets(name, asset_type)")
+        .order("next_due_date");
+      setSchedules(data || []);
+    } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async (schedule) => {
+    const { id, created_at, updated_at, assets: _j, ...fields } = schedule;
+    if (id) {
+      const { error } = await supabase.from("pm_schedules").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("pm_schedules").insert(fields);
+      if (error) throw error;
+    }
+    await load();
+  };
+  const remove = async (id) => {
+    await supabase.from("pm_schedules").delete().eq("id", id);
+    setSchedules((p) => p.filter((s) => s.id !== id));
+  };
+  const toggle = async (id, active) => {
+    await supabase.from("pm_schedules").update({ active, updated_at: new Date().toISOString() }).eq("id", id);
+    setSchedules((p) => p.map((s) => s.id === id ? { ...s, active } : s));
+  };
+  return { schedules, loading, load, save, remove, toggle };
+}
+
 // ---------- Priority badge ----------
 
 function PriorityBadge({ priority, size = "sm" }) {
@@ -1482,7 +1520,133 @@ function CertForm({ cert, propertyOptions, assets, onSave, onCancel }) {
   );
 }
 
-// ---------- Register Sheet (Assets + Certificates) ----------
+// ---------- PM Schedule Form ----------
+
+function PMScheduleForm({ schedule, propertyOptions, assets, teamOptions, onSave, onCancel }) {
+  const isNew = !schedule.id;
+  const [form, setForm] = useState({
+    property_name: schedule.property_name || propertyOptions[0] || "",
+    asset_id: schedule.asset_id || "",
+    title: schedule.title || "",
+    description: schedule.description || "",
+    priority: schedule.priority || "medium",
+    assigned_to: schedule.assigned_to || teamOptions[0] || "",
+    frequency_value: schedule.frequency_value || 3,
+    frequency_unit: schedule.frequency_unit || "months",
+    lead_time_days: schedule.lead_time_days ?? 0,
+    next_due_date: schedule.next_due_date || "",
+    active: schedule.active !== false,
+    ...(schedule.id ? { id: schedule.id } : {}),
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.property_name && form.title.trim() && form.next_due_date && form.frequency_value > 0;
+  const propAssets = assets.filter((a) => a.property_name === form.property_name);
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      await onSave({ ...form, title: form.title.trim(), asset_id: form.asset_id || null, frequency_value: Number(form.frequency_value), lead_time_days: Number(form.lead_time_days) });
+    } catch (e) { alert("Save failed: " + e.message); setSaving(false); }
+  };
+  const LabelInput = ({ label, field, type = "text", placeholder = "" }) => (
+    <div className="mb-3">
+      <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>{label}</p>
+      <input type={type} value={form[field]} onChange={(e) => set(field, e.target.value)} placeholder={placeholder}
+        className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+    </div>
+  );
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col" style={{ background: "#FAF6EE" }}>
+      <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
+        <button onClick={onCancel} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
+        <span className="font-semibold text-sm">{isNew ? "New PM Schedule" : "Edit PM Schedule"}</span>
+        <button onClick={handleSave} disabled={!valid || saving} className="text-sm font-semibold" style={{ color: (valid && !saving) ? "#0F0F0F" : "#D4C7B0" }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 scrollbar-hide">
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Property</p>
+          <select value={form.property_name} onChange={(e) => { set("property_name", e.target.value); set("asset_id", ""); }}
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <LabelInput label="Task Title" field="title" placeholder="e.g. Generator Service" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Description (optional)</p>
+          <textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={2} placeholder="Service instructions or scope…"
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Linked Asset (optional)</p>
+          <select value={form.asset_id} onChange={(e) => set("asset_id", e.target.value)}
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            <option value="">— None —</option>
+            {propAssets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Frequency</p>
+          <div className="flex gap-2">
+            <input type="number" min={1} max={365} value={form.frequency_value} onChange={(e) => set("frequency_value", e.target.value)}
+              className="w-20 rounded-xl px-3 py-2 text-sm text-center outline-none font-semibold" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+            <select value={form.frequency_unit} onChange={(e) => set("frequency_unit", e.target.value)}
+              className="flex-1 rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+              {PM_FREQUENCY_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <p className="text-xs mt-1" style={{ color: "#8A7A5C" }}>
+            Every {form.frequency_value} {form.frequency_unit}
+          </p>
+        </div>
+        <LabelInput label="Next Due Date *" field="next_due_date" type="date" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Lead Time (days before due to generate task)</p>
+          <input type="number" min={0} max={90} value={form.lead_time_days} onChange={(e) => set("lead_time_days", e.target.value)}
+            className="w-24 rounded-xl px-3 py-2 text-sm text-center outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Assigned To</p>
+          <select value={form.assigned_to} onChange={(e) => set("assigned_to", e.target.value)}
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            <option value="">— Unassigned —</option>
+            {teamOptions.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Priority</p>
+          <div className="flex gap-1.5 flex-wrap">
+            {PRIORITY_KEYS.map((pk) => {
+              const p = PRIORITIES[pk];
+              const active = form.priority === pk;
+              return (
+                <button key={pk} type="button" onClick={() => set("priority", pk)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+                  style={{ background: active ? p.bg : "white", color: active ? p.color : "#6B7280", border: `1px solid ${active ? p.dot : "rgba(0,0,0,0.08)"}` }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.dot, display: "inline-block" }} />
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {!isNew && (
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-xl" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+            <span className="text-sm font-medium" style={{ color: "#0F0F0F" }}>Active schedule</span>
+            <button onClick={() => set("active", !form.active)} className="w-10 h-6 rounded-full transition-colors relative"
+              style={{ background: form.active ? "#0F0F0F" : "#E5E7EB" }}>
+              <span className="absolute top-1 transition-all w-4 h-4 rounded-full bg-white" style={{ left: form.active ? "22px" : "4px" }} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Register Sheet (Assets + Certificates + PM) ----------
 
 function certExpiryStatus(expiryDate) {
   if (!expiryDate) return { color: "#9CA3AF", label: "Unknown" };
@@ -1498,12 +1662,14 @@ function assetStatusStyle(status) {
   return { color: "#15803D", bg: "#DCFCE7" };
 }
 
-function RegisterSheet({ onClose, propertyOptions }) {
+function RegisterSheet({ onClose, propertyOptions, teamOptions }) {
   const { assets, loading: assetsLoading, save: saveAsset, remove: removeAsset } = useAssets();
   const { certs, loading: certsLoading, save: saveCert, remove: removeCert } = useCertificates();
+  const { schedules, loading: pmLoading, save: savePM, remove: removePM, toggle: togglePM } = usePMSchedules();
   const [tab, setTab] = useState("assets");
   const [editingAsset, setEditingAsset] = useState(null);
   const [editingCert, setEditingCert] = useState(null);
+  const [editingPM, setEditingPM] = useState(null);
   const [filterProp, setFilterProp] = useState("All");
   const [confirmDelete, setConfirmDelete] = useState(null);
 
@@ -1513,9 +1679,13 @@ function RegisterSheet({ onClose, propertyOptions }) {
   if (editingCert !== null) {
     return <CertForm cert={editingCert} propertyOptions={propertyOptions} assets={assets} onSave={async (c) => { await saveCert(c); setEditingCert(null); }} onCancel={() => setEditingCert(null)} />;
   }
+  if (editingPM !== null) {
+    return <PMScheduleForm schedule={editingPM} propertyOptions={propertyOptions} assets={assets} teamOptions={teamOptions} onSave={async (s) => { await savePM(s); setEditingPM(null); }} onCancel={() => setEditingPM(null)} />;
+  }
 
   const filteredAssets = filterProp === "All" ? assets : assets.filter((a) => a.property_name === filterProp);
   const filteredCerts = filterProp === "All" ? certs : certs.filter((c) => c.property_name === filterProp);
+  const filteredSchedules = filterProp === "All" ? schedules : schedules.filter((s) => s.property_name === filterProp);
 
   const expiringSoon = certs.filter((c) => {
     if (!c.expiry_date) return false;
@@ -1533,7 +1703,7 @@ function RegisterSheet({ onClose, propertyOptions }) {
           </button>
           <span className="font-display text-lg" style={{ color: "#0F0F0F" }}>Property Register</span>
           <button
-            onClick={() => tab === "assets" ? setEditingAsset({}) : setEditingCert({})}
+            onClick={() => tab === "assets" ? setEditingAsset({}) : tab === "certs" ? setEditingCert({}) : setEditingPM({})}
             className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95"
             style={{ background: "#0F0F0F", color: "white" }}
           >
@@ -1553,7 +1723,11 @@ function RegisterSheet({ onClose, propertyOptions }) {
         )}
 
         <div className="flex gap-1 mb-3">
-          {[{ id: "assets", label: "Assets", icon: <Wrench size={11} /> }, { id: "certs", label: "Certificates", icon: <ShieldCheck size={11} /> }].map((t) => (
+          {[
+            { id: "assets", label: "Assets", icon: <Wrench size={11} /> },
+            { id: "certs", label: "Certs", icon: <ShieldCheck size={11} /> },
+            { id: "pm", label: "PM", icon: <RepeatIcon size={11} /> },
+          ].map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-semibold transition-all"
               style={{ background: tab === t.id ? "#0F0F0F" : "white", color: tab === t.id ? "white" : "#8A7A5C", border: "1px solid rgba(0,0,0,0.07)" }}>
               {t.icon}{t.label}
@@ -1607,7 +1781,7 @@ function RegisterSheet({ onClose, propertyOptions }) {
               })}
             </div>
           )
-        ) : (
+        ) : tab === "certs" ? (
           certsLoading ? (
             <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} /></div>
           ) : filteredCerts.length === 0 ? (
@@ -1636,6 +1810,57 @@ function RegisterSheet({ onClose, propertyOptions }) {
                       {c.expiry_date && <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Expires {new Date(c.expiry_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>}
                     </div>
                     <ChevronRight size={14} style={{ color: "#D4C7B0", flexShrink: 0, marginTop: 3 }} />
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          pmLoading ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} /></div>
+          ) : filteredSchedules.length === 0 ? (
+            <div className="text-center py-12">
+              <RepeatIcon size={28} style={{ color: "#D4C7B0", margin: "0 auto 8px" }} />
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>No PM schedules yet. Tap + to add one.</p>
+              <p className="text-xs mt-1" style={{ color: "#D4C7B0" }}>n8n will auto-generate tasks from active schedules daily.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+              {filteredSchedules.map((s, i) => {
+                const daysUntil = s.next_due_date ? Math.ceil((new Date(s.next_due_date) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+                const isOverdue = daysUntil !== null && daysUntil < 0;
+                const isSoon = daysUntil !== null && daysUntil >= 0 && daysUntil <= 14;
+                const dueBadgeColor = isOverdue ? "#B91C1C" : isSoon ? "#B45309" : "#15803D";
+                const dueBadgeBg = isOverdue ? "#FEE2E2" : isSoon ? "#FEF3C7" : "#DCFCE7";
+                return (
+                  <div key={s.id} className="px-4 py-3 cursor-pointer active:bg-black/[0.02] transition-colors"
+                    style={{ borderBottom: i < filteredSchedules.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none", opacity: s.active ? 1 : 0.45 }}
+                    onClick={() => setEditingPM(s)}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium" style={{ color: "#0F0F0F" }}>{s.title}</p>
+                          {!s.active && <span className="text-xs px-1.5 py-0.5 rounded-md" style={{ fontSize: "9px", background: "#F3F4F6", color: "#6B7280", fontWeight: 700 }}>PAUSED</span>}
+                        </div>
+                        <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>
+                          {s.property_name}{s.assets?.name ? ` · ${s.assets.name}` : ""}
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>
+                          Every {s.frequency_value} {s.frequency_unit}
+                          {s.assigned_to ? ` · ${s.assigned_to}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        {s.next_due_date && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-md font-semibold" style={{ fontSize: "9px", background: dueBadgeBg, color: dueBadgeColor }}>
+                            {isOverdue ? `${Math.abs(daysUntil)}d overdue` : daysUntil === 0 ? "Due today" : `${daysUntil}d`}
+                          </span>
+                        )}
+                        {s.next_due_date && (
+                          <p className="text-xs" style={{ color: "#9CA3AF" }}>{new Date(s.next_due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -2455,6 +2680,7 @@ export default function App() {
         {registerOpen && (
           <RegisterSheet
             propertyOptions={propertyOptions.filter((p) => p !== "All properties")}
+            teamOptions={teamOptions}
             onClose={() => setRegisterOpen(false)}
           />
         )}
