@@ -1273,6 +1273,14 @@ function useAssets() {
   useEffect(() => { load(); }, [load]);
   const save = async (asset) => {
     const { id, created_at, updated_at, ...fields } = asset;
+
+    // Resolve building_id from property_name so the buildings dashboard can find this asset
+    if (fields.property_name) {
+      const { data: bRow } = await supabase
+        .from("buildings").select("id").eq("name", fields.property_name).single();
+      fields.building_id = bRow?.id || null;
+    }
+
     if (id) {
       const { error } = await supabase.from("assets").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", id);
       if (error) throw error;
