@@ -5,7 +5,7 @@ import {
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
   Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
-  ClipboardList, Send, Archive, BarChart2,
+  ClipboardList, Send, Archive, BarChart2, Building2, ShieldCheck, Wrench, AlertTriangle,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -31,6 +31,17 @@ const STATUS_KEYS = Object.keys(STATUSES);
 const DONE_STATUS = "Done";
 const ARCHIVED_STATUS = "Archived";
 const ARCHIVED_STYLE = { label: "Archived", color: "#6B7280", bg: "#F3F4F6" };
+
+const PRIORITIES = {
+  low:      { label: "Low",      dot: "#9CA3AF", color: "#374151", bg: "#F3F4F6",  slaHours: null },
+  medium:   { label: "Medium",   dot: "#60A5FA", color: "#1D4ED8", bg: "#DBEAFE",  slaHours: 72   },
+  high:     { label: "High",     dot: "#F59E0B", color: "#B45309", bg: "#FEF3C7",  slaHours: 24   },
+  critical: { label: "Critical", dot: "#EF4444", color: "#B91C1C", bg: "#FEE2E2",  slaHours: 4    },
+};
+const PRIORITY_KEYS = Object.keys(PRIORITIES);
+
+const ASSET_TYPES = ["Lift", "Generator", "HVAC", "Fire System", "Electrical", "Plumbing", "BMS", "Security", "Pest Control", "Other"];
+const CERT_TYPES = ["COC (Electrical)", "Fire Safety", "Lift Inspection", "Generator Diesel Storage", "Pest Control Certificate", "Building Compliance", "HVAC Service", "Other"];
 
 // Photo upload constraints
 const MAX_PHOTO_WIDTH = 1024;
@@ -202,19 +213,23 @@ function usePersistedState(key, defaultValue) {
   return [state, setState];
 }
 
-const rowToTask = (row) => ({
-  id: (row["Task ID"] || "").trim(),
-  title: (row["Task Description"] || "").trim(),
-  property: (row["Property"] || "").trim(),
-  category: (row["Category"] || "").trim(),
-  assignee: (row["Assigned To"] || "Unassigned").trim(),
-  phone: (row["Phone Number"] || "").trim(),
-  status: STATUS_KEYS.includes(row["Status"]) || row["Status"] === ARCHIVED_STATUS
-    ? row["Status"]
-    : "Pending",
-  dueDate: (row["Due Date"] || "").trim(),
-  photoUrl: (row["Photo URL"] || "").trim(),
-});
+const rowToTask = (row) => {
+  const rawPriority = (row["Priority"] || "").trim().toLowerCase();
+  return {
+    id: (row["Task ID"] || "").trim(),
+    title: (row["Task Description"] || "").trim(),
+    property: (row["Property"] || "").trim(),
+    category: (row["Category"] || "").trim(),
+    assignee: (row["Assigned To"] || "Unassigned").trim(),
+    phone: (row["Phone Number"] || "").trim(),
+    status: STATUS_KEYS.includes(row["Status"]) || row["Status"] === ARCHIVED_STATUS
+      ? row["Status"]
+      : "Pending",
+    dueDate: (row["Due Date"] || "").trim(),
+    photoUrl: (row["Photo URL"] || "").trim(),
+    priority: PRIORITY_KEYS.includes(rawPriority) ? rawPriority : "medium",
+  };
+};
 
 const nextIdFor = (property, tasks) => {
   const prefix = (property || "TASK").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "TASK";
@@ -1214,6 +1229,420 @@ function StandaloneEditPage({ submissionId }) {
   );
 }
 
+// ---------- Supabase hooks: Assets + Certificates ----------
+
+function useAssets() {
+  const [assets, setAssets] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase.from("assets").select("*").order("property_name").order("name");
+      setAssets(data || []);
+    } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async (asset) => {
+    const { id, created_at, updated_at, ...fields } = asset;
+    if (id) {
+      const { error } = await supabase.from("assets").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("assets").insert(fields);
+      if (error) throw error;
+    }
+    await load();
+  };
+  const remove = async (id) => {
+    await supabase.from("assets").delete().eq("id", id);
+    setAssets((p) => p.filter((a) => a.id !== id));
+  };
+  return { assets, loading, load, save, remove };
+}
+
+function useCertificates() {
+  const [certs, setCerts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase.from("compliance_certificates").select("*, assets(name)").order("expiry_date");
+      setCerts(data || []);
+    } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async (cert) => {
+    const { id, created_at, assets: _j, ...fields } = cert;
+    if (id) {
+      const { error } = await supabase.from("compliance_certificates").update(fields).eq("id", id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("compliance_certificates").insert(fields);
+      if (error) throw error;
+    }
+    await load();
+  };
+  const remove = async (id) => {
+    await supabase.from("compliance_certificates").delete().eq("id", id);
+    setCerts((p) => p.filter((c) => c.id !== id));
+  };
+  return { certs, loading, load, save, remove };
+}
+
+// ---------- Priority badge ----------
+
+function PriorityBadge({ priority, size = "sm" }) {
+  const p = PRIORITIES[priority];
+  if (!p) return null;
+  const pad = size === "sm" ? "1px 5px" : "2px 8px";
+  const fs = size === "sm" ? "9px" : "11px";
+  return (
+    <span style={{ padding: pad, borderRadius: 4, fontSize: fs, fontWeight: 700, letterSpacing: "0.04em", background: p.bg, color: p.color, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: p.dot, display: "inline-block", flexShrink: 0 }} />
+      {p.label.toUpperCase()}
+    </span>
+  );
+}
+
+// ---------- Asset Form ----------
+
+function AssetForm({ asset, propertyOptions, onSave, onCancel }) {
+  const isNew = !asset.id;
+  const [form, setForm] = useState({
+    property_name: asset.property_name || propertyOptions[0] || "",
+    name: asset.name || "",
+    asset_type: asset.asset_type || ASSET_TYPES[0],
+    manufacturer: asset.manufacturer || "",
+    model: asset.model || "",
+    serial_number: asset.serial_number || "",
+    install_date: asset.install_date || "",
+    warranty_expiry: asset.warranty_expiry || "",
+    service_contract_vendor: asset.service_contract_vendor || "",
+    service_contract_expiry: asset.service_contract_expiry || "",
+    status: asset.status || "operational",
+    notes: asset.notes || "",
+    ...(asset.id ? { id: asset.id } : {}),
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.property_name && form.name.trim() && form.asset_type;
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try { await onSave({ ...form, name: form.name.trim() }); }
+    catch (e) { alert("Save failed: " + e.message); setSaving(false); }
+  };
+  const LabelInput = ({ label, field, type = "text", placeholder = "" }) => (
+    <div className="mb-3">
+      <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>{label}</p>
+      <input type={type} value={form[field]} onChange={(e) => set(field, e.target.value)} placeholder={placeholder}
+        className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+    </div>
+  );
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col" style={{ background: "#FAF6EE" }}>
+      <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
+        <button onClick={onCancel} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
+        <span className="font-semibold text-sm">{isNew ? "New Asset" : "Edit Asset"}</span>
+        <button onClick={handleSave} disabled={!valid || saving} className="text-sm font-semibold" style={{ color: (valid && !saving) ? "#0F0F0F" : "#D4C7B0" }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 scrollbar-hide">
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Property</p>
+          <select value={form.property_name} onChange={(e) => set("property_name", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <LabelInput label="Asset Name" field="name" placeholder="e.g. Lift 1 — East Wing" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Asset Type</p>
+          <select value={form.asset_type} onChange={(e) => set("asset_type", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {ASSET_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Status</p>
+          <div className="flex gap-2">
+            {["operational", "down", "decommissioned"].map((s) => (
+              <button key={s} onClick={() => set("status", s)} className="px-3 py-1.5 rounded-lg text-xs font-semibold capitalize"
+                style={{ background: form.status === s ? "#0F0F0F" : "white", color: form.status === s ? "white" : "#374151", border: "1px solid rgba(0,0,0,0.08)" }}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+        <LabelInput label="Manufacturer" field="manufacturer" />
+        <LabelInput label="Model" field="model" />
+        <LabelInput label="Serial Number" field="serial_number" />
+        <LabelInput label="Install Date" field="install_date" type="date" />
+        <LabelInput label="Warranty Expiry" field="warranty_expiry" type="date" />
+        <LabelInput label="Service Contract Vendor" field="service_contract_vendor" />
+        <LabelInput label="Service Contract Expiry" field="service_contract_expiry" type="date" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Notes</p>
+          <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={3} placeholder="Any additional notes…"
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Certificate Form ----------
+
+function CertForm({ cert, propertyOptions, assets, onSave, onCancel }) {
+  const isNew = !cert.id;
+  const [form, setForm] = useState({
+    property_name: cert.property_name || propertyOptions[0] || "",
+    asset_id: cert.asset_id || "",
+    cert_type: cert.cert_type || CERT_TYPES[0],
+    cert_number: cert.cert_number || "",
+    issued_by: cert.issued_by || "",
+    issue_date: cert.issue_date || "",
+    expiry_date: cert.expiry_date || "",
+    document_url: cert.document_url || "",
+    notes: cert.notes || "",
+    ...(cert.id ? { id: cert.id } : {}),
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.property_name && form.cert_type && form.expiry_date;
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try { await onSave({ ...form, asset_id: form.asset_id || null }); }
+    catch (e) { alert("Save failed: " + e.message); setSaving(false); }
+  };
+  const propAssets = assets.filter((a) => a.property_name === form.property_name);
+  const LabelInput = ({ label, field, type = "text", placeholder = "" }) => (
+    <div className="mb-3">
+      <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>{label}</p>
+      <input type={type} value={form[field]} onChange={(e) => set(field, e.target.value)} placeholder={placeholder}
+        className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+    </div>
+  );
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col" style={{ background: "#FAF6EE" }}>
+      <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
+        <button onClick={onCancel} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
+        <span className="font-semibold text-sm">{isNew ? "New Certificate" : "Edit Certificate"}</span>
+        <button onClick={handleSave} disabled={!valid || saving} className="text-sm font-semibold" style={{ color: (valid && !saving) ? "#0F0F0F" : "#D4C7B0" }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 scrollbar-hide">
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Property</p>
+          <select value={form.property_name} onChange={(e) => { set("property_name", e.target.value); set("asset_id", ""); }} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Certificate Type</p>
+          <select value={form.cert_type} onChange={(e) => set("cert_type", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {CERT_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Linked Asset (optional)</p>
+          <select value={form.asset_id} onChange={(e) => set("asset_id", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            <option value="">— Property-wide —</option>
+            {propAssets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <LabelInput label="Certificate Number" field="cert_number" />
+        <LabelInput label="Issued By" field="issued_by" />
+        <LabelInput label="Issue Date" field="issue_date" type="date" />
+        <LabelInput label="Expiry Date *" field="expiry_date" type="date" />
+        <LabelInput label="Document URL" field="document_url" type="url" placeholder="https://…" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Notes</p>
+          <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={3} className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Register Sheet (Assets + Certificates) ----------
+
+function certExpiryStatus(expiryDate) {
+  if (!expiryDate) return { color: "#9CA3AF", label: "Unknown" };
+  const days = (new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24);
+  if (days < 0) return { color: "#B91C1C", bg: "#FEE2E2", label: "Expired" };
+  if (days < 30) return { color: "#B45309", bg: "#FEF3C7", label: `${Math.ceil(days)}d left` };
+  return { color: "#15803D", bg: "#DCFCE7", label: "Valid" };
+}
+
+function assetStatusStyle(status) {
+  if (status === "down") return { color: "#B91C1C", bg: "#FEE2E2" };
+  if (status === "decommissioned") return { color: "#6B7280", bg: "#F3F4F6" };
+  return { color: "#15803D", bg: "#DCFCE7" };
+}
+
+function RegisterSheet({ onClose, propertyOptions }) {
+  const { assets, loading: assetsLoading, save: saveAsset, remove: removeAsset } = useAssets();
+  const { certs, loading: certsLoading, save: saveCert, remove: removeCert } = useCertificates();
+  const [tab, setTab] = useState("assets");
+  const [editingAsset, setEditingAsset] = useState(null);
+  const [editingCert, setEditingCert] = useState(null);
+  const [filterProp, setFilterProp] = useState("All");
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  if (editingAsset !== null) {
+    return <AssetForm asset={editingAsset} propertyOptions={propertyOptions} onSave={async (a) => { await saveAsset(a); setEditingAsset(null); }} onCancel={() => setEditingAsset(null)} />;
+  }
+  if (editingCert !== null) {
+    return <CertForm cert={editingCert} propertyOptions={propertyOptions} assets={assets} onSave={async (c) => { await saveCert(c); setEditingCert(null); }} onCancel={() => setEditingCert(null)} />;
+  }
+
+  const filteredAssets = filterProp === "All" ? assets : assets.filter((a) => a.property_name === filterProp);
+  const filteredCerts = filterProp === "All" ? certs : certs.filter((c) => c.property_name === filterProp);
+
+  const expiringSoon = certs.filter((c) => {
+    if (!c.expiry_date) return false;
+    const days = (new Date(c.expiry_date) - new Date()) / (1000 * 60 * 60 * 24);
+    return days >= 0 && days < 30;
+  }).length;
+  const expired = certs.filter((c) => c.expiry_date && new Date(c.expiry_date) < new Date()).length;
+
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col sheet-anim" style={{ background: "#FAF6EE" }}>
+      <div className="px-5 pt-5 pb-3">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+            <X size={16} />
+          </button>
+          <span className="font-display text-lg" style={{ color: "#0F0F0F" }}>Property Register</span>
+          <button
+            onClick={() => tab === "assets" ? setEditingAsset({}) : setEditingCert({})}
+            className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95"
+            style={{ background: "#0F0F0F", color: "white" }}
+          >
+            <Plus size={16} />
+          </button>
+        </div>
+
+        {(expired > 0 || expiringSoon > 0) && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-3" style={{ background: expired > 0 ? "#FEE2E2" : "#FEF3C7", border: `1px solid ${expired > 0 ? "rgba(185,28,28,0.15)" : "rgba(180,83,9,0.15)"}` }}>
+            <AlertTriangle size={13} style={{ color: expired > 0 ? "#B91C1C" : "#B45309", flexShrink: 0 }} />
+            <span className="text-xs font-medium" style={{ color: expired > 0 ? "#B91C1C" : "#B45309" }}>
+              {expired > 0 ? `${expired} expired cert${expired > 1 ? "s" : ""}` : ""}
+              {expired > 0 && expiringSoon > 0 ? " · " : ""}
+              {expiringSoon > 0 ? `${expiringSoon} expiring within 30 days` : ""}
+            </span>
+          </div>
+        )}
+
+        <div className="flex gap-1 mb-3">
+          {[{ id: "assets", label: "Assets", icon: <Wrench size={11} /> }, { id: "certs", label: "Certificates", icon: <ShieldCheck size={11} /> }].map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{ background: tab === t.id ? "#0F0F0F" : "white", color: tab === t.id ? "white" : "#8A7A5C", border: "1px solid rgba(0,0,0,0.07)" }}>
+              {t.icon}{t.label}
+            </button>
+          ))}
+        </div>
+
+        <select value={filterProp} onChange={(e) => setFilterProp(e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+          <option value="All">All properties</option>
+          {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-5 pb-8">
+        {tab === "assets" ? (
+          assetsLoading ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} /></div>
+          ) : filteredAssets.length === 0 ? (
+            <div className="text-center py-12">
+              <Wrench size={28} style={{ color: "#D4C7B0", margin: "0 auto 8px" }} />
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>No assets yet. Tap + to add one.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+              {filteredAssets.map((a, i) => {
+                const st = assetStatusStyle(a.status);
+                const warrantyDays = a.warranty_expiry ? (new Date(a.warranty_expiry) - new Date()) / (1000 * 60 * 60 * 24) : null;
+                const warrantyExp = warrantyDays !== null && warrantyDays < 60;
+                return (
+                  <div key={a.id} onClick={() => setEditingAsset(a)} className="flex items-start gap-3 px-4 py-3 cursor-pointer active:bg-black/[0.02] transition-colors"
+                    style={{ borderBottom: i < filteredAssets.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none" }}>
+                    <div className="mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#FAF6EE" }}>
+                      <Wrench size={14} style={{ color: "#8A7A5C" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium" style={{ color: "#0F0F0F" }}>{a.name}</p>
+                        <span className="text-xs px-1.5 py-0.5 rounded-md font-semibold capitalize" style={{ fontSize: "9px", ...st }}>{a.status}</span>
+                      </div>
+                      <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>{a.asset_type} · {a.property_name}</p>
+                      {a.serial_number && <p className="text-xs mt-0.5 font-mono" style={{ color: "#9CA3AF" }}>S/N: {a.serial_number}</p>}
+                      {warrantyExp && (
+                        <p className="text-xs mt-1 font-medium" style={{ color: warrantyDays < 0 ? "#B91C1C" : "#B45309" }}>
+                          {warrantyDays < 0 ? "Warranty expired" : `Warranty exp. ${Math.ceil(warrantyDays)}d`}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronRight size={14} style={{ color: "#D4C7B0", flexShrink: 0, marginTop: 3 }} />
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          certsLoading ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} /></div>
+          ) : filteredCerts.length === 0 ? (
+            <div className="text-center py-12">
+              <ShieldCheck size={28} style={{ color: "#D4C7B0", margin: "0 auto 8px" }} />
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>No certificates yet. Tap + to add one.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+              {filteredCerts.map((c, i) => {
+                const exp = certExpiryStatus(c.expiry_date);
+                const linkedAsset = c.assets?.name;
+                return (
+                  <div key={c.id} onClick={() => setEditingCert(c)} className="flex items-start gap-3 px-4 py-3 cursor-pointer active:bg-black/[0.02] transition-colors"
+                    style={{ borderBottom: i < filteredCerts.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none" }}>
+                    <div className="mt-1 w-3 h-3 rounded-full flex-shrink-0" style={{ background: exp.color }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium" style={{ color: "#0F0F0F" }}>{c.cert_type}</p>
+                        <span className="text-xs px-1.5 py-0.5 rounded-md font-semibold" style={{ fontSize: "9px", background: exp.bg || "#F3F4F6", color: exp.color }}>{exp.label}</span>
+                      </div>
+                      <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>
+                        {c.property_name}{linkedAsset ? ` · ${linkedAsset}` : ""}
+                      </p>
+                      {c.cert_number && <p className="text-xs font-mono mt-0.5" style={{ color: "#9CA3AF" }}>{c.cert_number}</p>}
+                      {c.expiry_date && <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Expires {new Date(c.expiry_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>}
+                    </div>
+                    <ChevronRight size={14} style={{ color: "#D4C7B0", flexShrink: 0, marginTop: 3 }} />
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+      </div>
+      {confirmDelete && (
+        <div className="absolute inset-0 z-10 flex items-end" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="w-full rounded-t-3xl px-5 py-6" style={{ background: "white" }}>
+            <p className="font-semibold mb-1" style={{ color: "#0F0F0F" }}>Delete this item?</p>
+            <p className="text-sm mb-4" style={{ color: "#8A7A5C" }}>This cannot be undone.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#F3F4F6", color: "#374151" }}>Cancel</button>
+              <button onClick={async () => { await confirmDelete.fn(); setConfirmDelete(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#B91C1C", color: "white" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Analytics ----------
 const PERSON_PALETTE = ["#0F4C5C","#7C3AED","#EA580C","#0284C7","#BE185D","#15803D","#B45309","#6366F1"];
 
@@ -1513,6 +1942,7 @@ export default function App() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
   const [activeView, setActiveView] = useState("tasks");
   const [syncing, setSyncing] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
@@ -1846,7 +2276,10 @@ export default function App() {
               <button onClick={refresh} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                 {syncing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
               </button>
-              <button onClick={() => setChecklistOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Lift RCA Checklist" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+              <button onClick={() => setRegisterOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Asset & Certificate Register" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                <Building2 size={15} />
+              </button>
+              <button onClick={() => setChecklistOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Checklists" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                 <ClipboardList size={15} />
               </button>
               <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
@@ -2001,6 +2434,12 @@ export default function App() {
             tasks={tasks}
             onClose={() => setNewTaskOpen(false)}
             onCreate={(data) => { addTask(data); setNewTaskOpen(false); }}
+          />
+        )}
+        {registerOpen && (
+          <RegisterSheet
+            propertyOptions={propertyOptions.filter((p) => p !== "All properties")}
+            onClose={() => setRegisterOpen(false)}
           />
         )}
         {checklistOpen && (
@@ -2340,6 +2779,10 @@ function TaskRow({ task, onClick, onToggle }) {
         {status.label === "In progress" ? "In prog" : status.label}
       </span>
 
+      {task.priority && task.priority !== "medium" && PRIORITIES[task.priority] && (
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: PRIORITIES[task.priority].dot, flexShrink: 0 }} title={PRIORITIES[task.priority].label} />
+      )}
+
       <div className="flex-1 min-w-0">
         <p
           className="text-sm leading-tight truncate"
@@ -2570,6 +3013,24 @@ function TaskDetailSheet({ task, createdAt, archivedAt, team, tasks, onClose, on
           <div className="flex gap-2 mb-3 flex-wrap">
             <span className="px-2 py-1 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
             {task.category && <span className="px-2 py-1 rounded-md font-semibold uppercase flex items-center gap-1" style={{ fontSize: "10px", background: "white", color: "#374151", border: "1px solid rgba(0,0,0,0.08)", letterSpacing: "0.05em" }}><Tag size={10} />{task.category}</span>}
+            {task.priority && PRIORITIES[task.priority] && <PriorityBadge priority={task.priority} size="sm" />}
+          </div>
+          <div className="mb-3">
+            <p className="text-xs uppercase mb-1.5" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Priority</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {PRIORITY_KEYS.map((pk) => {
+                const p = PRIORITIES[pk];
+                const active = (task.priority || "medium") === pk;
+                return (
+                  <button key={pk} onClick={() => onUpdate({ priority: pk })}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5"
+                    style={{ background: active ? p.bg : "white", color: active ? p.color : "#6B7280", border: `1px solid ${active ? p.dot : "rgba(0,0,0,0.08)"}` }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.dot, display: "inline-block" }} />
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="mb-2 flex flex-col gap-2">
             {editingTitle ? (
@@ -2792,6 +3253,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
   const [dueDate, setDueDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); });
   const [image, setImage] = useState(null);
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [priority, setPriority] = useState("medium");
   const [recurrence, setRecurrence] = useState("none");
   const [recurDay, setRecurDay] = useState(5); // 5 = Friday
   const [recurMonthDay, setRecurMonthDay] = useState(() => new Date().getDate());
@@ -2830,6 +3292,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
       assignee,
       phone: phone.trim(),
       status: "Pending",
+      priority,
       dueDate,
       image: image || undefined,
       recurring: recurrence,
@@ -2871,6 +3334,22 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
           </FieldGroup>
           <FieldGroup label="Due date">
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+          </FieldGroup>
+          <FieldGroup label="Priority">
+            <div className="flex gap-1.5 flex-wrap">
+              {PRIORITY_KEYS.map((pk) => {
+                const p = PRIORITIES[pk];
+                const active = priority === pk;
+                return (
+                  <button key={pk} type="button" onClick={() => setPriority(pk)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5"
+                    style={{ background: active ? p.bg : "#F5F0E8", color: active ? p.color : "#8A7A5C", border: `1px solid ${active ? p.dot : "transparent"}` }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.dot, display: "inline-block" }} />
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
           </FieldGroup>
           <FieldGroup label="Recurrence">
             <div className="flex gap-2 flex-wrap">
