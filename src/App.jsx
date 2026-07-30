@@ -4367,7 +4367,7 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
                   className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
                   style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
                   {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                  {submitting ? "Sending…" : webhookUrl ? "Send via Webhook" : "Download PDF"}
+                  {submitting ? "Sending…" : webhookUrl ? "Send via Email" : "Download PDF"}
                 </button>
               </div>
             </>
