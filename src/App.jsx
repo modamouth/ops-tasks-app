@@ -1614,7 +1614,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen w-full flex items-center justify-center p-0 sm:p-6"
+      className="min-h-screen w-full flex lg:block items-center justify-center p-0 sm:p-6 lg:p-0"
       style={{ background: "radial-gradient(ellipse at top, #E8DFD0 0%, #D4C7B0 50%, #B8A88A 100%)" }}
     >
       <style>{`
@@ -1625,10 +1625,13 @@ export default function App() {
         .sheet-anim { animation: slideUp 280ms cubic-bezier(0.32, 0.72, 0, 1); }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .fade-anim { animation: fadeIn 200ms ease-out; }
+        @media (min-width: 1024px) {
+          .app-card { max-height: none !important; }
+        }
       `}</style>
 
       <div
-        className="relative w-full sm:w-96 bg-white sm:rounded-3xl overflow-hidden shadow-2xl"
+        className="app-card relative w-full sm:w-96 lg:w-full bg-white sm:rounded-3xl lg:rounded-none overflow-hidden shadow-2xl lg:shadow-none"
         style={{
           height: "100vh", maxHeight: "844px", minHeight: "640px",
           boxShadow: "0 30px 80px -20px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06)",
