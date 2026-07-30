@@ -3128,6 +3128,7 @@ const BCA_INITIAL = {
   incidentRef: "",
   date: "",
   inspector: "",
+  recipientEmail: "",
   rows: Object.fromEntries(BCA_SECTIONS.map((s) => [s.key, s.items.map(() => ({ inspected: false, condition: "", priority: "", notes: "", photos: [] }))])),
 };
 
@@ -3275,6 +3276,7 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
   const handleSubmit = async () => {
     if (!form.building) { setSubmitError("Please select a building."); return; }
     if (!form.inspector.trim()) { setSubmitError("Please enter the inspector's name."); return; }
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
     setSubmitting(true);
     setSubmitError("");
     try {
@@ -3302,6 +3304,7 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
           body: JSON.stringify({
             action: "checklist_submission",
             timestamp: new Date().toISOString(),
+            recipientEmail: finalForm.recipientEmail,
             incidentRef: finalForm.incidentRef,
             building: finalForm.building,
             inspector: finalForm.inspector,
@@ -3373,7 +3376,7 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
             </div>
             <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Assessment updated" : "Assessment submitted"}</p>
             <p className="text-sm mb-5" style={{ color: "#8A7A5C" }}>
-              {submissionId ? "The record has been updated." : `BCA submitted for ${form.building || "site"}.`}
+              {submissionId ? "The record has been updated." : `Assessment submitted${form.recipientEmail ? ` to ${form.recipientEmail}` : ""}.`}
             </p>
             {standalone && savedId && (
               <div className="w-full max-w-sm mx-auto mb-5 p-4 rounded-2xl text-left"
@@ -3442,6 +3445,8 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
               <span className="font-semibold">Legend — </span>
               Condition: <span className="font-bold" style={{ color: "#15803D" }}>G</span>=Good  <span className="font-bold" style={{ color: "#A16207" }}>F</span>=Fair  <span className="font-bold" style={{ color: "#C2410C" }}>P</span>=Poor  <span className="font-bold" style={{ color: "#B91C1C" }}>C</span>=Critical  ·  Priority: <span className="font-bold">1</span>=Immediate  <span className="font-bold">2</span>=Short-term  <span className="font-bold">3</span>=Medium-term  <span className="font-bold">4</span>=Long-term
             </div>
+
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
 
             {BCA_SECTIONS.map((section) => (
               <div key={section.key}>
