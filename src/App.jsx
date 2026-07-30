@@ -978,51 +978,54 @@ const generateBCAPDF = (form) => {
     columnStyles: { 0: { cellWidth: 90 }, 1: { cellWidth: 90 } },
   });
 
-  // Inspection photos — one page per item that has a photo
+  // Inspection photos — one page per photo, grouped by item
   BCA_SECTIONS.forEach((section) => {
     const sectionRows = form.rows?.[section.key] || [];
     section.items.forEach((item, i) => {
       const row = sectionRows[i] || {};
-      if (!row.photo) return;
-      doc.addPage();
-      let py = m;
-      doc.setFillColor(15, 15, 15);
-      doc.rect(m, py, cW, 7, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.setTextColor(255, 255, 255);
-      doc.text("Inspection Photo", m + 3, py + 5);
-      doc.setTextColor(15, 15, 15);
-      py += 10;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
-      doc.setTextColor(138, 122, 92);
-      doc.text(section.title, m, py);
-      py += 5;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(15, 15, 15);
-      doc.text(item, m, py);
-      py += 5;
-      const meta = [];
-      if (row.condition) meta.push(`Condition: ${row.condition}`);
-      if (row.priority) meta.push(`Priority: ${row.priority}`);
-      if (row.notes) meta.push(`Notes: ${row.notes}`);
-      if (meta.length) {
-        doc.setFontSize(8);
-        doc.setTextColor(138, 122, 92);
-        doc.text(meta.join("   ·   "), m, py);
+      const photos = row.photos?.length ? row.photos : (row.photo ? [row.photo] : []);
+      photos.forEach((photo, photoIdx) => {
+        doc.addPage();
+        let py = m;
+        doc.setFillColor(15, 15, 15);
+        doc.rect(m, py, cW, 7, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(255, 255, 255);
+        const pageLabel = photos.length > 1 ? `Inspection Photo (${photoIdx + 1} of ${photos.length})` : "Inspection Photo";
+        doc.text(pageLabel, m + 3, py + 5);
         doc.setTextColor(15, 15, 15);
-        py += 6;
-      }
-      const imgEl = new Image();
-      imgEl.src = row.photo;
-      const maxW = cW;
-      const maxH = pageH - py - m;
-      const iW = imgEl.naturalWidth || 1200;
-      const iH = imgEl.naturalHeight || 900;
-      const ratio = Math.min(maxW / iW, maxH / iH);
-      doc.addImage(row.photo, "JPEG", m, py, iW * ratio, iH * ratio);
+        py += 10;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(138, 122, 92);
+        doc.text(section.title, m, py);
+        py += 5;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(15, 15, 15);
+        doc.text(item, m, py);
+        py += 5;
+        const meta = [];
+        if (row.condition) meta.push(`Condition: ${row.condition}`);
+        if (row.priority) meta.push(`Priority: ${row.priority}`);
+        if (row.notes) meta.push(`Notes: ${row.notes}`);
+        if (meta.length) {
+          doc.setFontSize(8);
+          doc.setTextColor(138, 122, 92);
+          doc.text(meta.join("   ·   "), m, py);
+          doc.setTextColor(15, 15, 15);
+          py += 6;
+        }
+        const imgEl = new Image();
+        imgEl.src = photo;
+        const maxW = cW;
+        const maxH = pageH - py - m;
+        const iW = imgEl.naturalWidth || 1200;
+        const iH = imgEl.naturalHeight || 900;
+        const ratio = Math.min(maxW / iW, maxH / iH);
+        doc.addImage(photo, "JPEG", m, py, iW * ratio, iH * ratio);
+      });
     });
   });
 
@@ -3125,7 +3128,7 @@ const BCA_INITIAL = {
   incidentRef: "",
   date: "",
   inspector: "",
-  rows: Object.fromEntries(BCA_SECTIONS.map((s) => [s.key, s.items.map(() => ({ inspected: false, condition: "", priority: "", notes: "", photo: "" }))])),
+  rows: Object.fromEntries(BCA_SECTIONS.map((s) => [s.key, s.items.map(() => ({ inspected: false, condition: "", priority: "", notes: "", photos: [] }))])),
 };
 
 function BCAItemRow({ item, row, onChange }) {
@@ -3136,25 +3139,30 @@ function BCAItemRow({ item, row, onChange }) {
     { v: "C", active: "#B91C1C" },
   ];
 
-  const handlePhoto = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX = 1200;
-        let w = img.width, h = img.height;
-        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        onChange("photo", canvas.toDataURL("image/jpeg", 0.72));
+  const addPhoto = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 1200;
+          let w = img.width, h = img.height;
+          if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          onChange("photos", [...(row.photos || []), canvas.toDataURL("image/jpeg", 0.72)]);
+        };
+        img.src = ev.target.result;
       };
-      img.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
   };
+
+  const removePhoto = (idx) => onChange("photos", (row.photos || []).filter((_, i) => i !== idx));
 
   return (
     <div className="rounded-xl p-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
@@ -3197,22 +3205,26 @@ function BCAItemRow({ item, row, onChange }) {
         className="w-full bg-transparent outline-none text-xs py-1.5 px-1"
         style={{ color: "#0F0F0F", borderTop: "1px solid rgba(0,0,0,0.06)" }} />
       <div className="pt-2 mt-1" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-        {row.photo ? (
-          <div className="flex items-start gap-2">
-            <img src={row.photo} alt="inspection" className="rounded-lg object-cover"
-              style={{ width: 72, height: 54, objectFit: "cover" }} />
-            <button type="button" onClick={() => onChange("photo", "")}
-              className="text-xs font-semibold mt-1" style={{ color: "#B91C1C" }}>
-              Remove photo
-            </button>
+        {(row.photos || []).length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-2">
+            {(row.photos || []).map((src, idx) => (
+              <div key={idx} className="relative flex-shrink-0">
+                <img src={src} alt={`photo ${idx + 1}`} className="rounded-lg"
+                  style={{ width: 72, height: 54, objectFit: "cover" }} />
+                <button type="button" onClick={() => removePhoto(idx)}
+                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+                  style={{ background: "#B91C1C", color: "white", fontSize: 9, lineHeight: 1 }}>
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
-        ) : (
-          <label className="flex items-center gap-1.5 cursor-pointer" style={{ color: "#8A7A5C" }}>
-            <Camera size={12} />
-            <span className="text-xs">Add photo</span>
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhoto} />
-          </label>
         )}
+        <label className="flex items-center gap-1.5 cursor-pointer" style={{ color: "#8A7A5C" }}>
+          <Camera size={12} />
+          <span className="text-xs">{(row.photos || []).length > 0 ? "Add another photo" : "Add photo"}</span>
+          <input type="file" accept="image/*" multiple className="hidden" onChange={addPhoto} />
+        </label>
       </div>
     </div>
   );
