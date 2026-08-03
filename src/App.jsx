@@ -4345,6 +4345,8 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
   const [submitError, setSubmitError] = useState("");
   const [savedId, setSavedId] = useState(submissionId);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
 
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -4376,6 +4378,20 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
     generateBCAPDF(form).save(fileName);
   };
 
+  // Save current progress to Supabase without firing the webhook or sending email
+  const handleSaveDraft = async () => {
+    if (!onSave || !submissionId) return;
+    setSavingDraft(true);
+    try {
+      const fileName = `bca-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      await onSave(form, fileName, submissionId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!form.building) { setSubmitError("Please select a building."); return; }
     if (!form.inspector.trim()) { setSubmitError("Please enter the inspector's name."); return; }
@@ -4391,16 +4407,24 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
       }
       const fileName = `bca-${finalForm.incidentRef || finalForm.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
       const doc = generateBCAPDF(finalForm);
-      const pdfBase64 = doc.output("datauristring");
 
       let resolvedId = submissionId;
-      if (standalone && !submissionId && onSave) {
+
+      // For edits: always write to DB first — the webhook email is secondary and
+      // should never block the save.
+      if (onSave && submissionId) {
+        await onSave(finalForm, fileName, submissionId);
+      } else if (standalone && !submissionId && onSave) {
+        // New standalone submission: create the record first so we have an edit link
         resolvedId = await onSave(finalForm, fileName, null);
       }
 
-      const editLink = resolvedId ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}` : null;
+      const editLink = resolvedId
+        ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}`
+        : null;
 
       if (webhookUrl) {
+        const pdfBase64 = doc.output("datauristring");
         const res = await fetch(webhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4423,7 +4447,8 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
         doc.save(fileName);
       }
 
-      if (onSave && !(standalone && !submissionId)) {
+      // For new non-standalone submissions: save to DB after webhook succeeds
+      if (onSave && !submissionId && !standalone) {
         const retId = await onSave(finalForm, fileName, resolvedId);
         if (retId && !resolvedId) resolvedId = retId;
       }
@@ -4462,11 +4487,20 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
               <Download size={14} />
             </button>
           )}
+          {/* Save — writes to Supabase without sending the email; only shown when editing */}
+          {submissionId && !submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
+            </button>
+          )}
           <button onClick={handleSubmit} disabled={submitting}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
             style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
             {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : webhookUrl ? "Send via Email" : "Download PDF")}
+            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update & Email" : webhookUrl ? "Send via Email" : "Download PDF")}
           </button>
         </div>
       </div>
