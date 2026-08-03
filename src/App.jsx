@@ -4323,8 +4323,23 @@ function BCAItemRow({ item, row, onChange }) {
   );
 }
 
+// Merge saved rows with the current BCA_SECTIONS so that items added after a save
+// get blank defaults instead of being undefined (which silently breaks setRow).
+function normalizeBCARows(savedRows) {
+  const blank = () => ({ inspected: false, condition: "", priority: "", notes: "", photos: [] });
+  return Object.fromEntries(
+    BCA_SECTIONS.map((s) => {
+      const saved = savedRows?.[s.key] || [];
+      return [s.key, s.items.map((_, i) => saved[i] ?? blank())];
+    })
+  );
+}
+
 function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Condition Assessment", onSave, initialData = null, submissionId = null }) {
-  const [form, setForm] = useState(initialData || BCA_INITIAL);
+  const initForm = initialData
+    ? { ...initialData, rows: normalizeBCARows(initialData.rows) }
+    : BCA_INITIAL;
+  const [form, setForm] = useState(initForm);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -4343,13 +4358,17 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
   }, [form.building]);
 
   const setRow = (sectionKey, idx, field, value) => {
-    setForm((f) => ({
-      ...f,
-      rows: {
-        ...f.rows,
-        [sectionKey]: f.rows[sectionKey].map((r, i) => i === idx ? { ...r, [field]: value } : r),
-      },
-    }));
+    setForm((f) => {
+      const section = f.rows[sectionKey];
+      if (!section) return f;
+      return {
+        ...f,
+        rows: {
+          ...f.rows,
+          [sectionKey]: section.map((r, i) => i === idx ? { ...r, [field]: value } : r),
+        },
+      };
+    });
   };
 
   const downloadPDF = () => {
