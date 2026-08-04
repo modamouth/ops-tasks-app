@@ -4084,6 +4084,8 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
   const [submitError, setSubmitError] = useState("");
   const [savedId, setSavedId] = useState(submissionId);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
 
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -4107,6 +4109,24 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
   const downloadPDF = () => {
     const fileName = `generator-info-${form.incidentRef || form.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
     generateGeneratorPDF(form).save(fileName);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSave) return;
+    setSavingDraft(true);
+    setSubmitError("");
+    try {
+      const existingId = savedId || submissionId || null;
+      const fileName = `generator-info-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
+    } finally {
+      setSavingDraft(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -4192,12 +4212,14 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
               <Download size={14} />
             </button>
           )}
-          <button onClick={handleSubmit} disabled={submitting}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-            style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
-            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : webhookUrl ? "Send via Email" : "Download PDF")}
-          </button>
+          {!submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -4531,12 +4553,14 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
 
   // Save current progress to Supabase without firing the webhook or sending email
   const handleSaveDraft = async () => {
-    if (!onSave || !submissionId) return;
+    if (!onSave) return;
     setSavingDraft(true);
     setSubmitError("");
     try {
+      const existingId = savedId || submissionId || null;
       const fileName = `bca-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
-      await onSave(form, fileName, submissionId);
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
       setDraftSaved(true);
       setTimeout(() => setDraftSaved(false), 2500);
     } catch (err) {
@@ -4641,8 +4665,7 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
               <Download size={14} />
             </button>
           )}
-          {/* Save — writes to Supabase without sending the email; only shown when editing */}
-          {submissionId && !submitted && (
+          {!submitted && (
             <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
               className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
               style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
@@ -4650,12 +4673,6 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
               {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
             </button>
           )}
-          <button onClick={handleSubmit} disabled={submitting}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-            style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
-            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update & Email" : webhookUrl ? "Send via Email" : "Download PDF")}
-          </button>
         </div>
       </div>
 
@@ -5217,6 +5234,8 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
   const [submitError, setSubmitError] = useState("");
   const [savedId, setSavedId] = useState(submissionId);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
 
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -5245,6 +5264,24 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
   const downloadPDF = () => {
     const fileName = `lift-rca-${form.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
     generateChecklistPDF(form).save(fileName);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSave) return;
+    setSavingDraft(true);
+    setSubmitError("");
+    try {
+      const existingId = savedId || submissionId || null;
+      const fileName = `lift-rca-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
+    } finally {
+      setSavingDraft(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -5330,12 +5367,14 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
             </button>
           )}
           <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
-          <button onClick={handleSubmit} disabled={submitting}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-            style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
-            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-            {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update" : webhookUrl ? "Send via Email" : "Download PDF")}
-          </button>
+          {!submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
+            </button>
+          )}
         </div>
 
         {/* Body */}
@@ -5741,12 +5780,14 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
   };
 
   const handleSaveDraft = async () => {
-    if (!onSave || !submissionId) return;
+    if (!onSave) return;
     setSavingDraft(true);
     setSubmitError("");
     try {
+      const existingId = savedId || submissionId || null;
       const fileName = `tenant-fire-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
-      await onSave(form, fileName, submissionId);
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
       setDraftSaved(true);
       setTimeout(() => setDraftSaved(false), 2500);
     } catch (err) {
@@ -5863,20 +5904,12 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
               <Download size={14} />
             </button>
           )}
-          {submissionId && !submitted && (
+          {!submitted && (
             <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
               className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
               style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
               {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
               {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
-            </button>
-          )}
-          {!submitted && (
-            <button onClick={handleSubmit} disabled={submitting}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
-              style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
-              {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
-              {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update & Email" : webhookUrl ? "Send via Email" : "Download PDF")}
             </button>
           )}
         </div>
@@ -6010,6 +6043,16 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
               style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
               <Plus size={14} /> Add Tenant
             </button>
+
+            <SectionHeader title="Send Report" />
+            <div className="flex gap-3 mt-2">
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update & Email" : webhookUrl ? "Send via Email" : "Download PDF")}
+              </button>
+            </div>
           </>
         )}
       </div>
