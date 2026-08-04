@@ -4942,14 +4942,22 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
             <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>
               Fill in a checklist internally, or share a link with an external party so they can complete it without accessing the task board.
             </p>
-            {CHECKLIST_REGISTRY.map((entry) => (
+            {CHECKLIST_REGISTRY.map((entry) => {
+              const typeColor = {
+                "lift-rca":       { bg: "#FEF3C7", color: "#92400E" },
+                "generator-info": { bg: "#DBEAFE", color: "#1E40AF" },
+                "bca-site":       { bg: "#D1FAE5", color: "#065F46" },
+                "tenant-fire":    { bg: "#FEE2E2", color: "#991B1B" },
+              }[entry.id] || { bg: "#F0EBE0", color: "#8A7A5C" };
+              return (
               <div key={entry.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
                 <div className="flex items-start justify-between gap-3 mb-1">
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm truncate" style={{ color: "#0F0F0F" }}>{entry.name}</p>
                     <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "#8A7A5C" }}>{entry.description}</p>
                   </div>
-                  <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+                  <span className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold"
+                    style={{ background: typeColor.bg, color: typeColor.color }}>
                     {entry.category}
                   </span>
                 </div>
@@ -4971,7 +4979,7 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
                   </button>
                 </div>
               </div>
-            ))}
+            );})}
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
