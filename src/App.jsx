@@ -1060,6 +1060,132 @@ const generateBCAPDF = (form) => {
   return doc;
 };
 
+// ========== Tenant Fire Inspection Checklist ==========
+
+const TENANT_FIRE_CHECKS = [
+  { key: "sprinklers",     label: "Sprinklers",           sub: "Stacking heights, obstruction" },
+  { key: "signage",        label: "Signage",               sub: "Escape routes, equipment" },
+  { key: "fireEquipment",  label: "Fire Equipment",        sub: "Extinguishers, hose reels, fire blankets" },
+  { key: "smokeDetectors", label: "Smoke Detectors",       sub: "Operational, no obstruction" },
+  { key: "escapeDoors",    label: "Escape Doors & Exits",  sub: "Obstruction, break glass units & keys in order" },
+];
+
+const blankTenantFireRow = () => ({
+  shopNo: "", tenantName: "",
+  sprinklers: "", signage: "", fireEquipment: "", smokeDetectors: "", escapeDoors: "",
+  comments: "",
+});
+
+const TENANT_FIRE_INITIAL = {
+  incidentRef: "", building: "", inspectionPeriod: "", inspector: "", recipientEmail: "",
+  rows: [blankTenantFireRow()],
+};
+
+const generateTenantFirePDF = (form) => {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = 297, pageH = 210, m = 10, cW = pageW - m * 2;
+  let y = m;
+
+  const checkY = (needed = 12) => { if (y + needed > pageH - m) { doc.addPage(); y = m; } };
+
+  // Title band
+  doc.setFillColor(15, 76, 92);
+  doc.rect(m, y, cW, 10, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(255, 255, 255);
+  doc.text("Tenant Fire Inspection Checklist", pageW / 2, y + 6.5, { align: "center" });
+  y += 13;
+
+  // Meta row
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(50, 50, 50);
+  doc.text(`Name of Centre: ${form.building || "—"}`, m, y);
+  doc.text(`Inspection Period: ${form.inspectionPeriod || "—"}`, m + 85, y);
+  doc.text(`Inspected by: ${form.inspector || "—"}`, m + 185, y);
+  y += 4.5;
+  doc.text(`Reference: ${form.incidentRef || "—"}`, m, y);
+  y += 5;
+
+  // Column layout
+  const shopW = 15, tenantW = 38, checkW = 25, commentsW = cW - shopW - tenantW - checkW * 5;
+  const cols = [
+    { w: shopW, lines: ["Shop #"] },
+    { w: tenantW, lines: ["Tenant Name"] },
+    { w: checkW, lines: ["Sprinklers", "(stacking heights,", "obstruction)"] },
+    { w: checkW, lines: ["Signage", "(escape routes,", "equipment)"] },
+    { w: checkW, lines: ["Fire Equipment", "(extinguishers, hose", "reels, fire blankets)"] },
+    { w: checkW, lines: ["Smoke Detectors", "(operational,", "no obstruction)"] },
+    { w: checkW, lines: ["Escape Doors & Exit", "Routes (obstruction,", "break glass & keys)"] },
+    { w: commentsW, lines: ["Comments, Observations,", "Action to be taken"] },
+  ];
+
+  // Header row
+  checkY(14);
+  const hH = 14;
+  doc.setFillColor(212, 206, 194);
+  doc.rect(m, y, cW, hH, "F");
+  let x = m;
+  cols.forEach((col) => {
+    doc.setDrawColor(170, 160, 145); doc.setLineWidth(0.2);
+    doc.rect(x, y, col.w, hH);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(15, 15, 15);
+    const lh = 3.5, startY = y + (hH - col.lines.length * lh) / 2 + lh * 0.8;
+    col.lines.forEach((line, li) => doc.text(line, x + col.w / 2, startY + li * lh, { align: "center" }));
+    x += col.w;
+  });
+  y += hH;
+
+  // Data rows
+  const rowH = 8;
+  const checkKeys = ["sprinklers", "signage", "fireEquipment", "smokeDetectors", "escapeDoors"];
+  (form.rows || []).forEach((row, ri) => {
+    checkY(rowH);
+    doc.setFillColor(...(ri % 2 === 0 ? [255, 255, 255] : [250, 248, 244]));
+    doc.rect(m, y, cW, rowH, "F");
+    x = m;
+    const cells = [row.shopNo || "", row.tenantName || "", ...checkKeys.map((k) => row[k] || ""), row.comments || ""];
+    cols.forEach((col, ci) => {
+      doc.setDrawColor(195, 188, 175); doc.setLineWidth(0.15);
+      doc.rect(x, y, col.w, rowH);
+      const val = cells[ci];
+      if (ci >= 2 && ci <= 6) {
+        if (val === "pass") {
+          doc.setFillColor(220, 252, 231); doc.setDrawColor(21, 128, 61); doc.setLineWidth(0.4);
+          doc.roundedRect(x + col.w / 2 - 6, y + 2, 12, 4.5, 0.8, 0.8, "FD");
+          doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(21, 128, 61);
+          doc.text("PASS", x + col.w / 2, y + 5.3, { align: "center" });
+        } else if (val === "fail") {
+          doc.setFillColor(254, 226, 226); doc.setDrawColor(185, 28, 28); doc.setLineWidth(0.4);
+          doc.roundedRect(x + col.w / 2 - 6, y + 2, 12, 4.5, 0.8, 0.8, "FD");
+          doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(185, 28, 28);
+          doc.text("FAIL", x + col.w / 2, y + 5.3, { align: "center" });
+        } else if (val === "na") {
+          doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); doc.setTextColor(120, 120, 120);
+          doc.text("N/A", x + col.w / 2, y + 5.3, { align: "center" });
+        } else {
+          doc.setTextColor(200, 195, 188);
+          doc.text("—", x + col.w / 2, y + 5.3, { align: "center" });
+        }
+        doc.setTextColor(15, 15, 15); doc.setLineWidth(0.15);
+      } else {
+        doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(15, 15, 15);
+        doc.text(doc.splitTextToSize(val, col.w - 2)[0] || "", x + 1.5, y + 5.3);
+      }
+      x += col.w;
+    });
+    y += rowH;
+  });
+
+  // Page numbers
+  const total = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(160, 155, 145);
+    doc.text(`Page ${p} of ${total}`, pageW - m, pageH - 4, { align: "right" });
+    doc.text(`Generated ${new Date().toLocaleDateString()}`, m, pageH - 4);
+  }
+
+  return doc;
+};
+
 const BUILDING_CODES = {
   "269 Independence": "IND",
   "44 On Post": "ONP",
@@ -1080,7 +1206,7 @@ const BUILDING_CODES = {
   "Windhoek Sanlam Centre": "WSC",
 };
 
-const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA", "generator-info": "GENI", "bca-site": "BCAS" };
+const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA", "generator-info": "GENI", "bca-site": "BCAS", "tenant-fire": "TFIRE" };
 
 const generateIncidentRef = async (building, checklistId) => {
   const code = BUILDING_CODES[building];
@@ -1177,6 +1303,14 @@ const CHECKLIST_REGISTRY = [
     category: "General",
     FormComponent: (props) => <BCASheet {...props} />,
     generatePDF: generateBCAPDF,
+  },
+  {
+    id: "tenant-fire",
+    name: "Tenant Fire Inspection",
+    description: "Per-tenant fire safety check: sprinklers, signage, equipment, smoke detectors, escape routes",
+    category: "Fire Safety",
+    FormComponent: (props) => <TenantFireSheet {...props} />,
+    generatePDF: generateTenantFirePDF,
   },
 ];
 
@@ -5564,6 +5698,305 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
             </>
           )}
         </div>
+    </div>
+  );
+
+  if (standalone) return content;
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      {content}
+    </div>
+  );
+}
+
+function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tenant Fire Inspection", onSave, initialData = null, submissionId = null }) {
+  const [form, setForm] = useState(initialData || TENANT_FIRE_INITIAL);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+  const setRow = (i, field, val) => setForm((f) => ({
+    ...f, rows: f.rows.map((r, ri) => ri === i ? { ...r, [field]: val } : r),
+  }));
+  const addRow = () => setForm((f) => ({ ...f, rows: [...f.rows, blankTenantFireRow()] }));
+  const removeRow = (i) => setForm((f) => ({ ...f, rows: f.rows.filter((_, ri) => ri !== i) }));
+
+  useEffect(() => {
+    if (submissionId) return;
+    if (form.building) {
+      generateIncidentRef(form.building, "tenant-fire").then((ref) => set("incidentRef", ref));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
+  const downloadPDF = () => {
+    const fileName = `tenant-fire-${form.incidentRef || form.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateTenantFirePDF(form).save(fileName);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSave || !submissionId) return;
+    setSavingDraft(true);
+    setSubmitError("");
+    try {
+      const fileName = `tenant-fire-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      await onSave(form, fileName, submissionId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!form.building) { setSubmitError("Please select a building."); return; }
+    if (!form.inspector.trim()) { setSubmitError("Please enter the inspector's name."); return; }
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
+    setSubmitting(true); setSubmitError("");
+    try {
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "tenant-fire");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `tenant-fire-${finalForm.incidentRef || finalForm.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateTenantFirePDF(finalForm);
+      let resolvedId = submissionId;
+
+      if (onSave && submissionId) {
+        await onSave(finalForm, fileName, submissionId);
+      } else if (standalone && !submissionId && onSave) {
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId
+        ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}`
+        : null;
+
+      if (webhookUrl) {
+        const pdfBase64 = doc.output("datauristring");
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            recipientEmail: finalForm.recipientEmail,
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            inspector: finalForm.inspector,
+            date: finalForm.inspectionPeriod,
+            formData: finalForm,
+            pdfBase64,
+            pdfFileName: fileName,
+            editLink,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(fileName);
+      }
+
+      if (onSave && !submissionId && !standalone) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
+      setSubmitted(true);
+    } catch (err) {
+      setSubmitError(err.message || "Submission failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => { setForm(TENANT_FIRE_INITIAL); setSubmitted(false); setSavedId(null); };
+
+  const CheckToggle = ({ value, onChange }) => (
+    <div className="flex gap-1">
+      {[["pass", "P", "#15803D", "#DCFCE7"], ["fail", "F", "#B91C1C", "#FEE2E2"], ["na", "N/A", "#6B7280", "#F3F4F6"]].map(([v, label, activeColor, activeBg]) => (
+        <button key={v} type="button" onClick={() => onChange(value === v ? "" : v)}
+          className="px-2 py-0.5 rounded text-xs font-semibold transition-all"
+          style={{
+            background: value === v ? activeBg : "transparent",
+            color: value === v ? activeColor : "#8A7A5C",
+            border: `1px solid ${value === v ? activeColor + "50" : "#D4C7B0"}`,
+          }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const content = (
+    <div className="min-h-screen pb-24 overflow-y-auto" style={{ background: "#FAF6EE" }}>
+      {/* Header */}
+      <div className="sticky top-0 z-30 px-4" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+        <div className="flex items-center justify-between py-3 max-w-xl mx-auto">
+          {!standalone && (
+            <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
+              ← Back
+            </button>
+          )}
+          <h1 className="font-display text-base font-bold truncate mx-2" style={{ color: "#0F0F0F" }}>{name}</h1>
+          {submissionId && !submitted ? (
+            <button onClick={handleSaveDraft} disabled={savingDraft}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95 flex items-center gap-1 flex-shrink-0"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: draftSaved ? "#15803D" : "white" }}>
+              {savingDraft ? <Loader2 size={11} className="animate-spin" /> : draftSaved ? <><Check size={11} /> Saved</> : "Save"}
+            </button>
+          ) : <div className="w-14" />}
+        </div>
+      </div>
+
+      <div className="px-4 py-4 max-w-xl mx-auto">
+        {submitted ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: "#0F4C5C" }}>
+              <Check size={22} style={{ color: "white" }} />
+            </div>
+            <h2 className="font-display text-xl font-bold mb-1" style={{ color: "#0F0F0F" }}>Submitted</h2>
+            <p className="text-sm mb-6" style={{ color: "#8A7A5C" }}>
+              The tenant fire inspection report has been sent to {form.recipientEmail}.
+            </p>
+            {standalone && savedId && (
+              <div className="w-full max-w-sm mb-5 p-4 rounded-2xl text-left"
+                style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Use this link to reopen and update this report at any time.</p>
+                <div className="flex gap-2">
+                  <input readOnly value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                    className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                    style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }} />
+                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1"
+                    style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                    {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
+            <button onClick={downloadPDF}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+              style={{ background: "#0F4C5C", color: "white" }}>
+              <Download size={14} /> Download PDF copy
+            </button>
+            {standalone && !submissionId && (
+              <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Submit another report</button>
+            )}
+            {!standalone && (
+              <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+            )}
+          </div>
+        ) : (
+          <>
+            {submitError && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>{submitError}</div>
+            )}
+
+            <SectionHeader title="Inspection Details" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Centre</div>
+              <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                <option value="">Select building…</option>
+                {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <InputRow label="Inspection Period" value={form.inspectionPeriod} onChange={(v) => set("inspectionPeriod", v)} placeholder="e.g. Jan 2026 / Q1 2026" />
+            <InputRow label="Inspected By" value={form.inspector} onChange={(v) => set("inspector", v)} placeholder="Full name" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Reference No.</div>
+                {form.building && BUILDING_CODES[form.building] && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                )}
+              </div>
+              <input value={form.incidentRef} onChange={(e) => set("incidentRef", e.target.value)}
+                placeholder="Select a building to generate"
+                className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+            </div>
+
+            <SectionHeader title="Tenant Inspections" />
+            {form.rows.map((row, i) => (
+              <div key={i} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8A7A5C" }}>
+                    {row.shopNo ? `Shop ${row.shopNo}` : row.tenantName || `Tenant ${i + 1}`}
+                  </p>
+                  {form.rows.length > 1 && (
+                    <button onClick={() => removeRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                  )}
+                </div>
+                <div className="flex gap-3 mb-3">
+                  <div className="w-20">
+                    <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Shop #</div>
+                    <input value={row.shopNo} onChange={(e) => setRow(i, "shopNo", e.target.value)}
+                      placeholder="e.g. 12" className="w-full bg-transparent outline-none text-sm"
+                      style={{ color: "#0F0F0F", borderBottom: "1px solid #E5DDD0", paddingBottom: "3px" }} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Tenant Name</div>
+                    <input value={row.tenantName} onChange={(e) => setRow(i, "tenantName", e.target.value)}
+                      placeholder="Trading name" className="w-full bg-transparent outline-none text-sm"
+                      style={{ color: "#0F0F0F", borderBottom: "1px solid #E5DDD0", paddingBottom: "3px" }} />
+                  </div>
+                </div>
+
+                {TENANT_FIRE_CHECKS.map(({ key, label, sub }) => (
+                  <div key={key} className="flex items-center justify-between py-2.5" style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
+                    <div className="flex-1 mr-3 min-w-0">
+                      <p className="text-xs font-semibold truncate" style={{ color: "#0F0F0F" }}>{label}</p>
+                      <p className="text-xs leading-tight" style={{ color: "#8A7A5C" }}>{sub}</p>
+                    </div>
+                    <CheckToggle value={row[key]} onChange={(v) => setRow(i, key, v)} />
+                  </div>
+                ))}
+
+                <div className="pt-3" style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
+                  <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Comments / Observations / Action required</div>
+                  <textarea value={row.comments} onChange={(e) => setRow(i, "comments", e.target.value)}
+                    rows={2} placeholder="Any issues, actions required…"
+                    className="w-full bg-transparent outline-none text-sm resize-none"
+                    style={{ color: "#0F0F0F", borderBottom: "1px solid #E5DDD0", paddingBottom: "3px" }} />
+                </div>
+              </div>
+            ))}
+
+            <button onClick={addRow}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold mb-4 transition-all active:scale-[0.98]"
+              style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
+              <Plus size={14} /> Add Tenant
+            </button>
+
+            <SectionHeader title="Send Report" />
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+            <div className="flex gap-2 mt-2">
+              <button onClick={downloadPDF}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
+                <Download size={14} /> Download PDF
+              </button>
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: submitting ? "#E5DFD5" : "#0F4C5C", color: submitting ? "#8A7A5C" : "white" }}>
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {submitting ? "Sending…" : submissionId ? "Update & Email" : "Submit & Email"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 
