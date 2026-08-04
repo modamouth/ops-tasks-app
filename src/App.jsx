@@ -1243,7 +1243,9 @@ function StandaloneEditPage({ submissionId }) {
       initialData={submission.form_data}
       submissionId={submission.id}
       onSave={async (formData, fileName, existingId) => {
-        await supabase.from("checklist_submissions").update({
+        const siteExtCount = formData?.rows?.siteExterior?.length ?? "?";
+        console.log("[BCA save] existingId:", existingId, "siteExterior items:", siteExtCount, "rows keys:", Object.keys(formData?.rows || {}));
+        const { error } = await supabase.from("checklist_submissions").update({
           form_data: formData,
           pdf_file_name: fileName,
           incident_ref: formData.incidentRef,
@@ -1252,6 +1254,11 @@ function StandaloneEditPage({ submissionId }) {
           date_of_failure: formData.dateOfFailure,
           submitted_at: new Date().toISOString(),
         }).eq("id", existingId);
+        if (error) {
+          console.error("[BCA save] Supabase error:", error);
+          throw new Error(error.message || "Save failed");
+        }
+        console.log("[BCA save] Success");
         return existingId;
       }}
     />
@@ -4327,10 +4334,15 @@ function BCAItemRow({ item, row, onChange }) {
 // get blank defaults instead of being undefined (which silently breaks setRow).
 function normalizeBCARows(savedRows) {
   const blank = () => ({ inspected: false, condition: "", priority: "", notes: "", photos: [] });
+  console.log("[BCA load] savedRows keys:", Object.keys(savedRows || {}));
+  BCA_SECTIONS.forEach((s) => {
+    const arr = savedRows?.[s.key];
+    console.log(`[BCA load] ${s.key}: saved length=${Array.isArray(arr) ? arr.length : "missing"}, expected=${s.items.length}`);
+  });
   return Object.fromEntries(
     BCA_SECTIONS.map((s) => {
-      const saved = savedRows?.[s.key] || [];
-      return [s.key, s.items.map((_, i) => saved[i] ?? blank())];
+      const saved = Array.isArray(savedRows?.[s.key]) ? savedRows[s.key] : [];
+      return [s.key, s.items.map((_, i) => (saved[i] != null ? saved[i] : blank()))];
     })
   );
 }
@@ -4382,11 +4394,14 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
   const handleSaveDraft = async () => {
     if (!onSave || !submissionId) return;
     setSavingDraft(true);
+    setSubmitError("");
     try {
       const fileName = `bca-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
       await onSave(form, fileName, submissionId);
       setDraftSaved(true);
       setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
     } finally {
       setSavingDraft(false);
     }
