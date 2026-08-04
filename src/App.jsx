@@ -4223,7 +4223,7 @@ function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Gener
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
         {submitted ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
@@ -4676,7 +4676,7 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
         {submitted ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
@@ -4938,7 +4938,7 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
         </div>
 
         {tab === "checklists" ? (
-          <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
             <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>
               Fill in a checklist internally, or share a link with an external party so they can complete it without accessing the task board.
             </p>
@@ -4982,7 +4982,7 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
             );})}
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
             {loading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} />
@@ -5396,7 +5396,7 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
           {submitted ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
@@ -5766,6 +5766,24 @@ function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RC
   );
 }
 
+function CheckToggle({ value, onChange }) {
+  return (
+    <div className="flex gap-1">
+      {[["pass", "P", "#15803D", "#DCFCE7"], ["fail", "F", "#B91C1C", "#FEE2E2"], ["na", "N/A", "#6B7280", "#F3F4F6"]].map(([v, label, activeColor, activeBg]) => (
+        <button key={v} type="button" onClick={() => onChange(value === v ? "" : v)}
+          className="px-2 py-0.5 rounded text-xs font-semibold transition-all"
+          style={{
+            background: value === v ? activeBg : "transparent",
+            color: value === v ? activeColor : "#8A7A5C",
+            border: `1px solid ${value === v ? activeColor + "50" : "#D4C7B0"}`,
+          }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tenant Fire Inspection", onSave, initialData = null, submissionId = null }) {
   const [form, setForm] = useState(initialData || TENANT_FIRE_INITIAL);
   const [submitting, setSubmitting] = useState(false);
@@ -5881,22 +5899,6 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
 
   const resetForm = () => { setForm(TENANT_FIRE_INITIAL); setSubmitted(false); setSavedId(null); };
 
-  const CheckToggle = ({ value, onChange }) => (
-    <div className="flex gap-1">
-      {[["pass", "P", "#15803D", "#DCFCE7"], ["fail", "F", "#B91C1C", "#FEE2E2"], ["na", "N/A", "#6B7280", "#F3F4F6"]].map(([v, label, activeColor, activeBg]) => (
-        <button key={v} type="button" onClick={() => onChange(value === v ? "" : v)}
-          className="px-2 py-0.5 rounded text-xs font-semibold transition-all"
-          style={{
-            background: value === v ? activeBg : "transparent",
-            color: value === v ? activeColor : "#8A7A5C",
-            border: `1px solid ${value === v ? activeColor + "50" : "#D4C7B0"}`,
-          }}>
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-
   const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
   return (
     <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
@@ -5933,7 +5935,7 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
         {submitted ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
