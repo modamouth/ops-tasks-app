@@ -5838,36 +5838,59 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
     </div>
   );
 
-  const content = (
-    <div className="min-h-screen pb-24 overflow-y-auto" style={{ background: "#FAF6EE" }}>
-      {/* Header */}
-      <div className="sticky top-0 z-30 px-4" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-        <div className="flex items-center justify-between py-3 max-w-xl mx-auto">
-          {!standalone && (
-            <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
-              ← Back
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  return (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
+      {/* Header — matches BCA/Generator pattern */}
+      <div className="px-5 pt-4 pb-3 flex items-center justify-between flex-shrink-0"
+        style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+        {standalone ? (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#B91C1C" }}>
+              <ShieldCheck size={13} style={{ color: "white" }} />
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>Fire Inspection</span>
+          </div>
+        ) : (
+          <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>← Back</button>
+        )}
+        <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+        <div className="flex items-center gap-2">
+          {!submitted && (
+            <button onClick={downloadPDF} title="Download PDF"
+              className="flex items-center justify-center w-8 h-8 rounded-xl transition-all active:scale-95"
+              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <Download size={14} />
             </button>
           )}
-          <h1 className="font-display text-base font-bold truncate mx-2" style={{ color: "#0F0F0F" }}>{name}</h1>
-          {submissionId && !submitted ? (
-            <button onClick={handleSaveDraft} disabled={savingDraft}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95 flex items-center gap-1 flex-shrink-0"
-              style={{ background: draftSaved ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: draftSaved ? "#15803D" : "white" }}>
-              {savingDraft ? <Loader2 size={11} className="animate-spin" /> : draftSaved ? <><Check size={11} /> Saved</> : "Save"}
+          {submissionId && !submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
             </button>
-          ) : <div className="w-14" />}
+          )}
+          {!submitted && (
+            <button onClick={handleSubmit} disabled={submitting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+              {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
+              {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update & Email" : webhookUrl ? "Send via Email" : "Download PDF")}
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="px-4 py-4 max-w-xl mx-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
         {submitted ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: "#0F4C5C" }}>
-              <Check size={22} style={{ color: "white" }} />
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+              <CheckCircle2 size={28} style={{ color: "#15803D" }} />
             </div>
-            <h2 className="font-display text-xl font-bold mb-1" style={{ color: "#0F0F0F" }}>Submitted</h2>
+            <h2 className="font-display text-xl font-bold mb-1" style={{ color: "#0F0F0F" }}>Report Submitted</h2>
             <p className="text-sm mb-6" style={{ color: "#8A7A5C" }}>
-              The tenant fire inspection report has been sent to {form.recipientEmail}.
+              Sent to {form.recipientEmail}.
             </p>
             {standalone && savedId && (
               <div className="w-full max-w-sm mb-5 p-4 rounded-2xl text-left"
@@ -5926,8 +5949,17 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
                 placeholder="Select a building to generate"
                 className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
             </div>
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
 
             <SectionHeader title="Tenant Inspections" />
+            <div className="rounded-xl px-4 py-2.5 mb-3 text-xs" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+              <span className="font-semibold" style={{ color: "#3F3A2E" }}>Legend</span>
+              {" — "}
+              <span className="font-semibold" style={{ color: "#15803D" }}>P</span> = Pass (compliant) ·{" "}
+              <span className="font-semibold" style={{ color: "#B91C1C" }}>F</span> = Fail (non-compliant) ·{" "}
+              <span className="font-semibold" style={{ color: "#6B7280" }}>N/A</span> = Not applicable
+            </div>
+
             {form.rows.map((row, i) => (
               <div key={i} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
                 <div className="flex items-center justify-between mb-3">
@@ -5956,7 +5988,7 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
                 {TENANT_FIRE_CHECKS.map(({ key, label, sub }) => (
                   <div key={key} className="flex items-center justify-between py-2.5" style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
                     <div className="flex-1 mr-3 min-w-0">
-                      <p className="text-xs font-semibold truncate" style={{ color: "#0F0F0F" }}>{label}</p>
+                      <p className="text-xs font-semibold" style={{ color: "#0F0F0F" }}>{label}</p>
                       <p className="text-xs leading-tight" style={{ color: "#8A7A5C" }}>{sub}</p>
                     </div>
                     <CheckToggle value={row[key]} onChange={(v) => setRow(i, key, v)} />
@@ -5978,32 +6010,9 @@ function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tena
               style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
               <Plus size={14} /> Add Tenant
             </button>
-
-            <SectionHeader title="Send Report" />
-            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
-            <div className="flex gap-2 mt-2">
-              <button onClick={downloadPDF}
-                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
-                <Download size={14} /> Download PDF
-              </button>
-              <button onClick={handleSubmit} disabled={submitting}
-                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                style={{ background: submitting ? "#E5DFD5" : "#0F4C5C", color: submitting ? "#8A7A5C" : "white" }}>
-                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                {submitting ? "Sending…" : submissionId ? "Update & Email" : "Submit & Email"}
-              </button>
-            </div>
           </>
         )}
       </div>
-    </div>
-  );
-
-  if (standalone) return content;
-  return (
-    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
-      {content}
     </div>
   );
 }
