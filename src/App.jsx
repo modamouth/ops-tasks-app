@@ -5011,7 +5011,14 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
                   </div>
                 ) : (
                   submissions.filter(s => showArchived ? s.archived : !s.archived).map((sub) => {
-                    const entryName = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id)?.name || sub.checklist_id;
+                    const entry = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id);
+                    const entryName = entry?.name || sub.checklist_id;
+                    const typeColor = {
+                      "lift-rca":       { bg: "#FEF3C7", color: "#92400E" },
+                      "generator-info": { bg: "#DBEAFE", color: "#1E40AF" },
+                      "bca-site":       { bg: "#D1FAE5", color: "#065F46" },
+                      "tenant-fire":    { bg: "#FEE2E2", color: "#991B1B" },
+                    }[sub.checklist_id] || { bg: "#F0EBE0", color: "#8A7A5C" };
                     return (
                       <div key={sub.id} className="rounded-2xl p-4 mb-3" style={{ background: showArchived ? "#F7F4EE" : "white", border: "1px solid rgba(0,0,0,0.07)" }}>
                         <div className="flex items-start justify-between gap-2 mb-2">
@@ -5023,8 +5030,9 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
                               <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Ref: {sub.incident_ref}</p>
                             )}
                           </div>
-                          <span className="flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
-                            {entryName.split(" ")[0]}
+                          <span className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold leading-tight text-right"
+                            style={{ background: typeColor.bg, color: typeColor.color }}>
+                            {entryName}
                           </span>
                         </div>
                         <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: "#8A7A5C" }}>
