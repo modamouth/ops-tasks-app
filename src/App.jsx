@@ -4900,14 +4900,16 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
       : CHECKLIST_REGISTRY.find((c) => c.id === activeId);
     if (!entry) return null;
     return (
-      <entry.FormComponent
-        webhookUrl={webhookUrl}
-        onClose={() => { setActiveId(null); setEditingSubmission(null); }}
-        name={entry.name}
-        initialData={editingSubmission?.form_data || null}
-        submissionId={editingSubmission?.id || null}
-        onSave={(formData, pdfFileName, subId) => saveSubmission(entry, formData, pdfFileName, subId)}
-      />
+      <div className="absolute inset-0 z-30">
+        <entry.FormComponent
+          webhookUrl={webhookUrl}
+          onClose={() => { setActiveId(null); setEditingSubmission(null); }}
+          name={entry.name}
+          initialData={editingSubmission?.form_data || null}
+          submissionId={editingSubmission?.id || null}
+          onSave={(formData, pdfFileName, subId) => saveSubmission(entry, formData, pdfFileName, subId)}
+        />
+      </div>
     );
   }
 
