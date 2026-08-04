@@ -1244,16 +1244,21 @@ function StandaloneEditPage({ submissionId }) {
       submissionId={submission.id}
       onSave={async (formData, fileName, existingId) => {
         const siteExtCount = formData?.rows?.siteExterior?.length ?? "?";
-        console.log("[BCA save] existingId:", existingId, "siteExterior items:", siteExtCount, "rows keys:", Object.keys(formData?.rows || {}));
-        const { error } = await supabase.from("checklist_submissions").update({
+        console.log("[BCA save] existingId:", existingId, "siteExterior items:", siteExtCount);
+        const patch = {
           form_data: formData,
           pdf_file_name: fileName,
-          incident_ref: formData.incidentRef,
-          building: formData.building,
-          lift_id: formData.liftId,
-          date_of_failure: formData.dateOfFailure,
+          incident_ref: formData.incidentRef ?? null,
+          building: formData.building ?? null,
           submitted_at: new Date().toISOString(),
-        }).eq("id", existingId);
+        };
+        // Only add lift-specific columns if the submission is a lift checklist
+        // (these columns may not exist for other checklist types)
+        if (submission.checklist_id !== "bca-site") {
+          if (formData.liftId !== undefined) patch.lift_id = formData.liftId;
+          if (formData.dateOfFailure !== undefined) patch.date_of_failure = formData.dateOfFailure;
+        }
+        const { error } = await supabase.from("checklist_submissions").update(patch).eq("id", existingId);
         if (error) {
           console.error("[BCA save] Supabase error:", error);
           throw new Error(error.message || "Save failed");
