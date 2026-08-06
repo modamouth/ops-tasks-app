@@ -4,12 +4,23 @@ import {
   Search, Plus, MapPin, Clock, X, Check, AlertCircle, Settings,
   Inbox, CheckCircle2, Circle, RefreshCw, MoreHorizontal,
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
-  Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown,
+  Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
+  ClipboardList, Send, Archive, BarChart2, Building2, ShieldCheck, Wrench, AlertTriangle, Calendar, RepeatIcon, LayoutGrid,
 } from "lucide-react";
+import { Link } from "react-router-dom";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  "https://wbntrynyoymukhswcvgm.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndibnRyeW55b3ltdWtoc3djdmdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyMjUzMDQsImV4cCI6MjEwMDgwMTMwNH0.jtxR8OqtgtYHRdn1PFeXOb91NHhNwJFcfmjc0f-RWZc"
+);
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
 const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHe-qEY2VB71JlIVsx40UPWQGGMRXmAuJ0-hWKTmkvbrzJJt6jDJv2Evw9au27nX705LEwwPzkjLr8/pub?output=csv";
 const ENV_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
+const ENV_APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "";
 
 // ---------- CONFIG ----------
 const STATUSES = {
@@ -21,6 +32,29 @@ const STATUS_KEYS = Object.keys(STATUSES);
 const DONE_STATUS = "Done";
 const ARCHIVED_STATUS = "Archived";
 const ARCHIVED_STYLE = { label: "Archived", color: "#6B7280", bg: "#F3F4F6" };
+
+const PRIORITIES = {
+  low:      { label: "Low",      dot: "#9CA3AF", color: "#374151", bg: "#F3F4F6",  slaHours: null },
+  medium:   { label: "Medium",   dot: "#60A5FA", color: "#1D4ED8", bg: "#DBEAFE",  slaHours: 72   },
+  high:     { label: "High",     dot: "#F59E0B", color: "#B45309", bg: "#FEF3C7",  slaHours: 24   },
+  critical: { label: "Critical", dot: "#EF4444", color: "#B91C1C", bg: "#FEE2E2",  slaHours: 4    },
+};
+const PRIORITY_KEYS = Object.keys(PRIORITIES);
+
+const ASSET_TYPE_GROUPS = [
+  { group: "Vertical Transportation", types: ["Lift / Elevator", "Escalator", "Travelator"] },
+  { group: "Power & Electrical", types: ["Generator (diesel/petrol)", "Transformer", "Main Distribution Board (MDB)", "UPS System", "Solar/Inverter System", "Electrical Sub-station"] },
+  { group: "Fire & Life Safety", types: ["Fire Hydrant", "Fire Hose Reel", "Fire Extinguisher", "Sprinkler System", "Fire Detection/Alarm Panel", "Emergency Lighting", "Fire Pump"] },
+  { group: "HVAC & Mechanical", types: ["Air Conditioning Unit (split/central)", "Chiller", "Cooling Tower", "Ventilation Fan/Extraction System", "Boiler"] },
+  { group: "Water & Plumbing", types: ["Water Pump", "Borehole", "Water Tank/Reservoir", "Sewage Pump Station", "Backflow Preventer"] },
+  { group: "Security & Access", types: ["CCTV System", "Access Control System", "Boom Gate / Barrier", "Turnstile", "Intercom System"] },
+  { group: "Building Envelope & Structural", types: ["Roof", "Facade/Cladding", "Glazing/Curtain Wall", "Structural (general)"] },
+  { group: "Signage & Wayfinding", types: ["Illuminated Signage", "Digital Signage/Screens"] },
+  { group: "Cleaning & Grounds", types: ["Irrigation System", "Landscaping Equipment", "Refuse/Compactor Equipment"] },
+  { group: "Other", types: ["Parking Equipment (pay stations, gates)", "Loading Dock Equipment", "General/Miscellaneous"] },
+];
+const ASSET_TYPES = ASSET_TYPE_GROUPS.flatMap((g) => g.types);
+const CERT_TYPES = ["COC (Electrical)", "Fire Safety", "Lift Inspection", "Generator Diesel Storage", "Pest Control Certificate", "Building Compliance", "HVAC Service", "Other"];
 
 // Photo upload constraints
 const MAX_PHOTO_WIDTH = 1024;
@@ -192,19 +226,23 @@ function usePersistedState(key, defaultValue) {
   return [state, setState];
 }
 
-const rowToTask = (row) => ({
-  id: (row["Task ID"] || "").trim(),
-  title: (row["Task Description"] || "").trim(),
-  property: (row["Property"] || "").trim(),
-  category: (row["Category"] || "").trim(),
-  assignee: (row["Assigned To"] || "Unassigned").trim(),
-  phone: (row["Phone Number"] || "").trim(),
-  status: STATUS_KEYS.includes(row["Status"]) || row["Status"] === ARCHIVED_STATUS
-    ? row["Status"]
-    : "Pending",
-  dueDate: (row["Due Date"] || "").trim(),
-  photoUrl: (row["Photo URL"] || "").trim(),
-});
+const rowToTask = (row) => {
+  const rawPriority = (row["Priority"] || "").trim().toLowerCase();
+  return {
+    id: (row["Task ID"] || "").trim(),
+    title: (row["Task Description"] || "").trim(),
+    property: (row["Property"] || "").trim(),
+    category: (row["Category"] || "").trim(),
+    assignee: (row["Assigned To"] || "Unassigned").trim(),
+    phone: (row["Phone Number"] || "").trim(),
+    status: STATUS_KEYS.includes(row["Status"]) || row["Status"] === ARCHIVED_STATUS
+      ? row["Status"]
+      : "Pending",
+    dueDate: (row["Due Date"] || "").trim(),
+    photoUrl: (row["Photo URL"] || "").trim(),
+    priority: PRIORITY_KEYS.includes(rawPriority) ? rawPriority : "medium",
+  };
+};
 
 const nextIdFor = (property, tasks) => {
   const prefix = (property || "TASK").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "TASK";
@@ -277,6 +315,918 @@ const nextRecurringDue = (recurring, recurringDay, currentDue) => {
   return null;
 };
 
+const buildAndSavePDF = (name, tasks) => {
+  const outstanding = tasks
+    .filter((t) => t.assignee === name && t.status !== DONE_STATUS && t.status !== ARCHIVED_STATUS)
+    .sort((a, b) => new Date(a.dueDate || "9999-12-31") - new Date(b.dueDate || "9999-12-31"));
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const today = new Date().toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" });
+
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Outstanding Tasks — ${name}`, 14, 20);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(120, 110, 90);
+  doc.text(`Generated ${today} · ${outstanding.length} task${outstanding.length !== 1 ? "s" : ""}`, 14, 27);
+  doc.setTextColor(0, 0, 0);
+
+  autoTable(doc, {
+    startY: 33,
+    head: [["ID", "Task", "Property", "Category", "Status", "Due Date"]],
+    body: outstanding.map((t) => [
+      t.id || "",
+      t.title || "",
+      t.property || "",
+      t.category || "",
+      t.status || "",
+      t.dueDate || "",
+    ]),
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [15, 15, 15], textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 20 },
+      1: { cellWidth: 65 },
+      2: { cellWidth: 35 },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 20 },
+      5: { cellWidth: 22 },
+    },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+
+  doc.save(`tasks-${name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`);
+};
+
+const downloadPersonPDF = async (name, csvUrl) => {
+  const res = await fetch(csvUrl);
+  if (!res.ok) throw new Error(`Failed to fetch sheet: HTTP ${res.status}`);
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+  const allTasks = parsed.data.map(rowToTask).filter((t) => t.id);
+  buildAndSavePDF(name, allTasks);
+};
+
+const generateChecklistPDF = (form) => {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const m = 15;
+  const cW = pageW - m * 2;
+  let y = 20;
+
+  const checkY = (needed = 12) => {
+    if (y + needed > 275) { doc.addPage(); y = 18; }
+  };
+
+  const sectionTitle = (title) => {
+    checkY(14);
+    doc.setFillColor(15, 15, 15);
+    doc.rect(m, y, cW, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, m + 3, y + 5);
+    doc.setTextColor(0, 0, 0);
+    y += 10;
+  };
+
+  // Draw a checkbox (square) — filled teal when checked, light grey border when not
+  const cb = (checked, label, indent = 0) => {
+    checkY(7);
+    const sz = 3.2;
+    const bx = m + indent;
+    const by = y - sz + 0.5;
+    doc.setLineWidth(0.25);
+    if (checked) {
+      doc.setFillColor(15, 76, 92);
+      doc.setDrawColor(15, 76, 92);
+      doc.rect(bx, by, sz, sz, "FD");
+      doc.setDrawColor(255, 255, 255);
+      doc.setLineWidth(0.55);
+      doc.line(bx + 0.55, by + sz * 0.52, bx + sz * 0.42, by + sz * 0.84);
+      doc.line(bx + sz * 0.42, by + sz * 0.84, bx + sz - 0.45, by + 0.55);
+    } else {
+      doc.setFillColor(250, 250, 250);
+      doc.setDrawColor(180, 180, 180);
+      doc.rect(bx, by, sz, sz, "FD");
+    }
+    doc.setLineWidth(0.2);
+    doc.setDrawColor(0, 0, 0);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0, 0, 0);
+    const lines = doc.splitTextToSize(label, cW - indent - sz - 2.5);
+    doc.text(lines, bx + sz + 2, y);
+    y += Math.max(5.5, lines.length * 5);
+  };
+
+  // Draw a radio button (circle) — filled when selected
+  const rb = (selected, label, indent = 0) => {
+    checkY(7);
+    const r = 1.7;
+    const cx = m + indent + r;
+    const cy = y - r + 0.4;
+    doc.setLineWidth(0.25);
+    if (selected) {
+      doc.setFillColor(15, 76, 92);
+      doc.setDrawColor(15, 76, 92);
+      doc.circle(cx, cy, r, "FD");
+      doc.setFillColor(255, 255, 255);
+      doc.circle(cx, cy, r * 0.42, "F");
+    } else {
+      doc.setFillColor(250, 250, 250);
+      doc.setDrawColor(180, 180, 180);
+      doc.circle(cx, cy, r, "FD");
+    }
+    doc.setLineWidth(0.2);
+    doc.setDrawColor(0, 0, 0);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0, 0, 0);
+    const lines = doc.splitTextToSize(label, cW - indent - r * 2 - 2.5);
+    doc.text(lines, m + indent + r * 2 + 1.5, y);
+    y += Math.max(5.5, lines.length * 5);
+  };
+
+  const bodyText = (text, indent = 0) => {
+    if (!text) { checkY(6); doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.text("—", m + indent, y); y += 6; return; }
+    const lines = doc.splitTextToSize(text, cW - indent);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    lines.forEach((line) => { checkY(6); doc.text(line, m + indent, y); y += 5; });
+  };
+
+  const boldLabel = (label) => {
+    checkY(8);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(label, m, y);
+    y += 5;
+  };
+
+  // Title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text("Lift Breakdown / Maintenance Incident Report", m, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text("RCA & Corrective Actions Checklist", m, y);
+  y += 4;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(m, y, m + cW, y);
+  y += 6;
+
+  // Lift Details
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Lift Details", ""]],
+    body: [
+      ["Building / Location", form.building || "—"],
+      ["Lift Identification", form.liftId || "—"],
+      ["Date of Failure", form.dateOfFailure || "—"],
+      ["Time of Failure", form.timeOfFailure || "—"],
+      ["Time Reported", form.timeReported || "—"],
+      ["Time Technician Arrived", form.timeTechArrived || "—"],
+      ["Time Lift Restored", form.timeLiftRestored || "—"],
+      ["Service Provider", form.serviceProvider || "—"],
+      ["Technician Name", form.technicianName || "—"],
+      ["Incident Reference No.", form.incidentRef || "—"],
+    ],
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 70 } },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Section 1
+  sectionTitle("1. Root Cause Analysis (RCA)");
+  cb(form.rcaCompleted, "Detailed RCA completed and attached");
+  y += 2;
+  boldLabel("Actual Cause of Failure:");
+  bodyText(form.actualCause, 3);
+  y += 2;
+  boldLabel("Failure Category:");
+  [
+    ["electrical", "Electrical Fault"],
+    ["mechanical", "Mechanical Fault"],
+    ["control", "Control System Fault"],
+    ["door", "Door System Fault"],
+    ["safety", "Safety Circuit Fault"],
+    ["external", "External Cause (Power Surge / Electrical Disturbance / Other)"],
+    ["other", "Other: " + (form.failureCategoryOther || "")],
+  ].forEach(([key, label]) => rb(form.failureCategory === key, label, 3));
+  y += 2;
+  boldLabel("Description of Failure:");
+  bodyText(form.failureDescription, 3);
+  y += 4;
+
+  // Section 2
+  sectionTitle("2. Corrective Actions Undertaken");
+  cb(form.correctiveActionsCompleted, "Corrective actions completed and documented");
+  y += 2;
+  const corrRows = (form.correctiveActions || []).filter((r) => r.action || r.dateCompleted || r.technician);
+  if (corrRows.length) {
+    autoTable(doc, {
+      startY: y, margin: { left: m, right: m },
+      head: [["Action", "Date Completed", "Technician"]],
+      body: corrRows.map((r) => [r.action || "", r.dateCompleted || "", r.technician || ""]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [80, 80, 80], textColor: [255, 255, 255] },
+      columnStyles: { 0: { cellWidth: 90 }, 1: { cellWidth: 35 } },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  } else {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+    doc.text("No corrective actions recorded.", m + 3, y); y += 8;
+  }
+
+  // Section 3
+  sectionTitle("3. Components Repaired / Adjusted / Tested / Replaced");
+  const compRows = (form.components || []).filter((r) => r.component || r.actionTaken || r.partNumber);
+  if (compRows.length) {
+    autoTable(doc, {
+      startY: y, margin: { left: m, right: m },
+      head: [["Component", "Action Taken", "Part Number", "Date Completed"]],
+      body: compRows.map((r) => [r.component || "", r.actionTaken || "", r.partNumber || "", r.dateCompleted || ""]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [80, 80, 80], textColor: [255, 255, 255] },
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  } else {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+    doc.text("No components recorded.", m + 3, y); y += 6;
+  }
+  cb(form.componentsRecorded, "All replaced components recorded");
+  cb(form.testingCompleted, "Testing completed after repairs");
+  cb(form.safetyChecksCompleted, "Lift safety checks completed");
+  y += 4;
+
+  // Section 4
+  sectionTitle("4. Temporary Measures Implemented");
+  cb(form.tempMeasuresImplemented, "Temporary measures implemented to restore service");
+  y += 2;
+  boldLabel("Details of Temporary Measures:");
+  bodyText(form.tempMeasuresDetails, 3);
+  y += 2;
+  checkY(8);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+  doc.text("Duration: From", m, y);
+  doc.setFont("helvetica", "normal");
+  doc.text((form.tempMeasuresFrom || "—") + "   To:  " + (form.tempMeasuresTo || "—"), m + 32, y);
+  y += 6;
+  cb(form.tempMeasureRemoved, "Temporary measure removed after permanent repair");
+  cb(form.tempMeasureStillActive, "Temporary measure still active");
+  y += 4;
+
+  // Section 5
+  sectionTitle("5. Outstanding Remedial Actions");
+  const outRows = (form.outstandingActions || []).filter((r) => r.action || r.responsiblePerson || r.dueDate || r.status);
+  if (outRows.length) {
+    autoTable(doc, {
+      startY: y, margin: { left: m, right: m },
+      head: [["Outstanding Action", "Responsible Person", "Due Date", "Status"]],
+      body: outRows.map((r) => [r.action || "", r.responsiblePerson || "", r.dueDate || "", r.status || ""]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [80, 80, 80], textColor: [255, 255, 255] },
+    });
+    y = doc.lastAutoTable.finalY + 4;
+  } else {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+    doc.text("No outstanding actions recorded.", m + 3, y); y += 6;
+  }
+  cb(form.noOutstandingActions, "No outstanding actions");
+  cb(form.outstandingCommunicated, "Outstanding actions communicated to Facilities Management");
+  y += 4;
+
+  // Section 6
+  sectionTitle("6. Residual Operational / Reliability / Safety Risks");
+  boldLabel("Remaining Risks Identified:");
+  cb(form.noResidualRisks, "No residual risks identified", 3);
+  cb(form.operationalRisk, "Operational Risk", 3);
+  cb(form.reliabilityRisk, "Reliability Risk", 3);
+  cb(form.safetyRisk, "Safety Risk", 3);
+  cb(form.complianceRisk, "Compliance Risk", 3);
+  y += 2;
+  boldLabel("Risk Details:");
+  bodyText(form.riskDetails, 3);
+  y += 2;
+  boldLabel("Recommended Mitigation Measures:");
+  bodyText(form.mitigationMeasures, 3);
+  y += 4;
+
+  // Section 7
+  sectionTitle("7. Final Verification & Sign-Off");
+  boldLabel("Lift Operational Status:");
+  rb(form.operationalStatus === "fully", "Fully Operational", 3);
+  rb(form.operationalStatus === "monitoring", "Operational with Monitoring Required", 3);
+  rb(form.operationalStatus === "outofservice", "Out of Service", 3);
+  y += 2;
+  boldLabel("Final Testing Completed:");
+  rb(form.finalTestingCompleted === true, "Yes", 3);
+  rb(form.finalTestingCompleted === false, "No", 3);
+  y += 2;
+  boldLabel("Monitoring Period Required:");
+  bodyText(form.monitoringPeriod, 3);
+  y += 4;
+
+  checkY(32);
+  autoTable(doc, {
+    startY: y, margin: { left: m, right: m },
+    body: [
+      ["Service Provider Confirmation", "", "Facilities Management Verification", ""],
+      ["Name:", form.serviceProviderName || "", "Name:", form.fmName || ""],
+      ["Date:", form.serviceProviderDate || "", "Date:", form.fmDate || ""],
+    ],
+    styles: { fontSize: 9, cellPadding: 3 },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 55 }, 2: { fontStyle: "bold", cellWidth: 55 } },
+  });
+  y = doc.lastAutoTable.finalY + 4;
+
+  boldLabel("Landlord Notification Completed:");
+  rb(form.landlordNotified === true, "Yes", 3);
+  rb(form.landlordNotified === false, "No", 3);
+  y += 2;
+  boldLabel("Incident Closed Date:");
+  bodyText(form.incidentClosedDate, 3);
+
+  return doc;
+};
+
+const generateGeneratorPDF = (form) => {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const m = 15;
+  const cW = pageW - m * 2;
+  let y = m;
+
+  const checkY = (needed = 20) => {
+    if (y + needed > pageH - m) { doc.addPage(); y = m; }
+  };
+
+  const sectionTitle = (title) => {
+    checkY(12);
+    doc.setFillColor(15, 15, 15);
+    doc.rect(m, y, cW, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, m + 3, y + 5);
+    doc.setTextColor(15, 15, 15);
+    y += 10;
+  };
+
+  // Title block
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(15, 15, 15);
+  doc.text("Generator Information Audit", m, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(138, 122, 92);
+  doc.text("Tenant & Centre Generator Audit: Installation, Diesel Storage & COC Certificates", m, y);
+  y += 4;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(m, y, m + cW, y);
+  doc.setTextColor(15, 15, 15);
+  y += 6;
+
+  // Header details table
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Report Details", ""]],
+    body: [
+      ["Building / Location", form.building || "—"],
+      ["Incident Reference No.", form.incidentRef || "—"],
+      ["Recipient Email", form.recipientEmail || "—"],
+    ],
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 70 } },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Tenant generators section
+  sectionTitle("1. Tenant Generator Information");
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Premises / Unit", "Tenant Name", "Trading Name", "Generator\nInstalled", "Photo of\nInstallation", "Diesel\non Site", "Diesel\nAmount", "COC\nCert."]],
+    body: form.tenantRows.map((r) => [
+      r.premises || "—",
+      r.tenantName || "—",
+      r.tradingName || "—",
+      r.generatorInstalled || "—",
+      r.pictureOfInstallation || "—",
+      r.dieselOnSite || "—",
+      r.dieselOnSite === "Yes" ? (r.amountOfDiesel || "—") : "—",
+      r.cocCertificate || "—",
+    ]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 28 },
+      1: { cellWidth: 28 },
+      2: { cellWidth: 28 },
+      3: { cellWidth: 22 },
+      4: { cellWidth: 24 },
+      5: { cellWidth: 14 },
+      6: { cellWidth: 22 },
+      7: { cellWidth: 14 },
+    },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Centre generators section
+  sectionTitle("2. Generator for Centre");
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Type", "Size / kVA", "Serial Numbers", "Diesel Stored", "Area / Items Covered"]],
+    body: form.centreGenerators.map((r) => [
+      r.type || "—",
+      r.size || "—",
+      r.serialNumbers || "—",
+      r.amountOfDiesel || "—",
+      r.areaCovered || "—",
+    ]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+    columnStyles: {
+      0: { cellWidth: 28 },
+      1: { cellWidth: 24 },
+      2: { cellWidth: 44 },
+      3: { cellWidth: 30 },
+    },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  // Incident ref footer
+  if (form.incidentRef) {
+    checkY(8);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(138, 122, 92);
+    doc.text(`Ref: ${form.incidentRef}`, m, y);
+    doc.setTextColor(15, 15, 15);
+  }
+
+  // Installation photos — one per page (portrait)
+  const photoRows = (form.tenantRows || []).filter((r) => r.pictureOfInstallation === "Yes" && r.installationPhoto);
+  if (photoRows.length > 0) {
+    photoRows.forEach((row) => {
+      doc.addPage();
+      let py = m;
+      doc.setFillColor(15, 15, 15);
+      doc.rect(m, py, cW, 7, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.text("Installation Photo", m + 3, py + 5);
+      doc.setTextColor(15, 15, 15);
+      py += 10;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(138, 122, 92);
+      const label = [row.premises, row.tenantName, row.tradingName].filter(Boolean).join(" · ");
+      doc.text(label || "Tenant", m, py);
+      doc.setTextColor(15, 15, 15);
+      py += 6;
+      const maxW = cW;
+      const maxH = pageH - py - m;
+      const img = new Image();
+      img.src = row.installationPhoto;
+      const iW = img.naturalWidth || 1200;
+      const iH = img.naturalHeight || 900;
+      const ratio = Math.min(maxW / iW, maxH / iH);
+      doc.addImage(row.installationPhoto, "JPEG", m, py, iW * ratio, iH * ratio);
+    });
+  }
+
+  return doc;
+};
+
+const BCA_SECTIONS = [
+  { key: "siteExterior", title: "1. Site & Exterior", items: [
+    "Paving, parking areas & driveways",
+    "Boundary walls, fencing & gates",
+    "Stormwater drainage & site grading",
+    "Landscaping & retaining structures",
+    "Site lighting",
+    "Signage",
+    "Refuse/waste enclosures",
+  ]},
+  { key: "structural", title: "2. Structural", items: [
+    "Foundations",
+    "Columns & load-bearing walls",
+    "Floor slabs / structural floors",
+    "Roof structure & trusses",
+    "Beams & lintels",
+    "Visible cracking, corrosion or deflection",
+  ]},
+  { key: "buildingEnvelope", title: "3. Building Envelope", items: [
+    "Roof covering & waterproofing",
+    "Gutters, downpipes & flashing",
+    "External walls / cladding / render",
+    "Windows & external doors",
+    "Sealants & expansion joints",
+    "Damp-proofing / rising damp evidence",
+  ]},
+  { key: "electrical", title: "4. Electrical", items: [
+    "Main distribution board(s) & sub-boards",
+    "Reticulation / wiring condition",
+    "Lighting (internal & external)",
+    "Standby generator / UPS",
+    "Earthing & lightning protection",
+    "Metering",
+  ]},
+  { key: "mechanical", title: "5. Mechanical / HVAC", items: [
+    "Air-conditioning units (split/central)",
+    "Ventilation & extraction systems",
+    "Ducting & insulation",
+    "Boilers / geysers / hot water systems",
+  ]},
+  { key: "plumbing", title: "6. Plumbing & Drainage", items: [
+    "Water supply reticulation & pressure",
+    "Sanitary drainage & sewer lines",
+    "Sanitary fittings & fixtures",
+    "Water storage tanks & pumps",
+    "Stormwater / roof drainage connections",
+  ]},
+  { key: "fire", title: "7. Fire & Life Safety", items: [
+    "Fire detection & alarm system",
+    "Fire extinguishers & hose reels",
+    "Sprinkler system",
+    "Emergency lighting & signage",
+    "Fire escape routes & doors",
+    "Fire pump & fire water storage",
+  ]},
+  { key: "verticalTransport", title: "8. Vertical Transportation", items: [
+    "Passenger lifts",
+    "Goods lifts",
+    "Escalators",
+    "Stairs & handrails",
+  ]},
+  { key: "interiorFinishes", title: "9. Interior Finishes", items: [
+    "Floor finishes",
+    "Wall finishes / partitions",
+    "Ceilings",
+    "Internal doors & ironmongery",
+    "Ablutions / kitchenettes",
+  ]},
+  { key: "accessibility", title: "10. Accessibility & Compliance", items: [
+    "Ramps & accessible entrances",
+    "Accessible parking & ablutions",
+    "Occupational health & safety compliance",
+    "Statutory certificates / COCs on file",
+  ]},
+];
+
+const generateBCAPDF = (form) => {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const m = 15;
+  const cW = pageW - m * 2;
+  let y = m;
+
+  const checkY = (needed = 20) => {
+    if (y + needed > pageH - m) { doc.addPage(); y = m; }
+  };
+
+  const sectionTitle = (title) => {
+    checkY(20);
+    doc.setFillColor(15, 15, 15);
+    doc.rect(m, y, cW, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title, m + 3, y + 5);
+    doc.setTextColor(15, 15, 15);
+    y += 10;
+  };
+
+  // Title block
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(15, 15, 15);
+  doc.text("Building Condition Assessment", m, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(138, 122, 92);
+  doc.text("Site Inspection Checklist", m, y);
+  y += 4;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(m, y, m + cW, y);
+  doc.setTextColor(15, 15, 15);
+  y += 6;
+
+  // Header details
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Inspection Details", ""]],
+    body: [
+      ["Property / Building", form.building || "—"],
+      ["Date of Inspection", form.date || "—"],
+      ["Inspector", form.inspector || "—"],
+      ["Reference No.", form.incidentRef || "—"],
+    ],
+    styles: { fontSize: 9, cellPadding: 2.5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 70 } },
+    alternateRowStyles: { fillColor: [250, 246, 238] },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  // Condition / Priority legend
+  checkY(8);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 15, 15);
+  doc.text("Condition:", m, y);
+  doc.setFont("helvetica", "normal");
+  doc.text("G=Good  F=Fair  P=Poor  C=Critical", m + 17, y);
+  doc.setFont("helvetica", "bold");
+  doc.text("Priority:", m + 75, y);
+  doc.setFont("helvetica", "normal");
+  doc.text("1=Immediate (0–12mo)  2=Short-term (1–3yr)  3=Medium-term (3–5yr)  4=Long-term (5–10yr+)", m + 91, y);
+  y += 8;
+
+  // Sections
+  BCA_SECTIONS.forEach((section) => {
+    sectionTitle(section.title);
+    const sectionRows = form.rows?.[section.key] || [];
+    autoTable(doc, {
+      startY: y,
+      margin: { left: m, right: m },
+      head: [["✓", "Item", "Condition", "Priority", "Notes"]],
+      body: section.items.map((item, i) => {
+        const row = sectionRows[i] || {};
+        return [
+          row.inspected ? "✓" : "",
+          item,
+          row.condition || "—",
+          row.priority ? `${row.priority}` : "—",
+          row.notes || "",
+        ];
+      }),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 8, halign: "center", fontStyle: "bold" },
+        1: { cellWidth: 80 },
+        2: { cellWidth: 22, halign: "center" },
+        3: { cellWidth: 20, halign: "center" },
+        4: { cellWidth: 50 },
+      },
+      alternateRowStyles: { fillColor: [250, 246, 238] },
+    });
+    y = doc.lastAutoTable.finalY + 5;
+  });
+
+  // Inspector sign-off
+  sectionTitle("Inspector Sign-off");
+  autoTable(doc, {
+    startY: y,
+    margin: { left: m, right: m },
+    head: [["Name", "Signature"]],
+    body: [[form.inspector || "", ""]],
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: [15, 15, 15], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 0: { cellWidth: 90 }, 1: { cellWidth: 90 } },
+  });
+
+  // Inspection photos — one page per photo, grouped by item
+  BCA_SECTIONS.forEach((section) => {
+    const sectionRows = form.rows?.[section.key] || [];
+    section.items.forEach((item, i) => {
+      const row = sectionRows[i] || {};
+      const photos = row.photos?.length ? row.photos : (row.photo ? [row.photo] : []);
+      photos.forEach((photo, photoIdx) => {
+        doc.addPage();
+        let py = m;
+        doc.setFillColor(15, 15, 15);
+        doc.rect(m, py, cW, 7, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(255, 255, 255);
+        const pageLabel = photos.length > 1 ? `Inspection Photo (${photoIdx + 1} of ${photos.length})` : "Inspection Photo";
+        doc.text(pageLabel, m + 3, py + 5);
+        doc.setTextColor(15, 15, 15);
+        py += 10;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(138, 122, 92);
+        doc.text(section.title, m, py);
+        py += 5;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(15, 15, 15);
+        doc.text(item, m, py);
+        py += 5;
+        const meta = [];
+        if (row.condition) meta.push(`Condition: ${row.condition}`);
+        if (row.priority) meta.push(`Priority: ${row.priority}`);
+        if (row.notes) meta.push(`Notes: ${row.notes}`);
+        if (meta.length) {
+          doc.setFontSize(8);
+          doc.setTextColor(138, 122, 92);
+          doc.text(meta.join("   ·   "), m, py);
+          doc.setTextColor(15, 15, 15);
+          py += 6;
+        }
+        const imgEl = new Image();
+        imgEl.src = photo;
+        const maxW = cW;
+        const maxH = pageH - py - m;
+        const iW = imgEl.naturalWidth || 1200;
+        const iH = imgEl.naturalHeight || 900;
+        const ratio = Math.min(maxW / iW, maxH / iH);
+        doc.addImage(photo, "JPEG", m, py, iW * ratio, iH * ratio);
+      });
+    });
+  });
+
+  return doc;
+};
+
+// ========== Tenant Fire Inspection Checklist ==========
+
+const TENANT_FIRE_CHECKS = [
+  { key: "sprinklers",     label: "Sprinklers",           sub: "Stacking heights, obstruction" },
+  { key: "signage",        label: "Signage",               sub: "Escape routes, equipment" },
+  { key: "fireEquipment",  label: "Fire Equipment",        sub: "Extinguishers, hose reels, fire blankets" },
+  { key: "smokeDetectors", label: "Smoke Detectors",       sub: "Operational, no obstruction" },
+  { key: "escapeDoors",    label: "Escape Doors & Exits",  sub: "Obstruction, break glass units & keys in order" },
+];
+
+const blankTenantFireRow = () => ({
+  shopNo: "", tenantName: "",
+  sprinklers: "", signage: "", fireEquipment: "", smokeDetectors: "", escapeDoors: "",
+  comments: "",
+});
+
+const TENANT_FIRE_INITIAL = {
+  incidentRef: "", building: "", inspectionPeriod: "", inspector: "", recipientEmail: "",
+  rows: [blankTenantFireRow()],
+};
+
+const generateTenantFirePDF = (form) => {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = 297, pageH = 210, m = 10, cW = pageW - m * 2;
+  let y = m;
+
+  const checkY = (needed = 12) => { if (y + needed > pageH - m) { doc.addPage(); y = m; } };
+
+  // Title band
+  doc.setFillColor(15, 76, 92);
+  doc.rect(m, y, cW, 10, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(255, 255, 255);
+  doc.text("Tenant Fire Inspection Checklist", pageW / 2, y + 6.5, { align: "center" });
+  y += 13;
+
+  // Meta row
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(50, 50, 50);
+  doc.text(`Name of Centre: ${form.building || "—"}`, m, y);
+  doc.text(`Inspection Period: ${form.inspectionPeriod || "—"}`, m + 85, y);
+  doc.text(`Inspected by: ${form.inspector || "—"}`, m + 185, y);
+  y += 4.5;
+  doc.text(`Reference: ${form.incidentRef || "—"}`, m, y);
+  y += 5;
+
+  // Column layout
+  const shopW = 15, tenantW = 38, checkW = 25, commentsW = cW - shopW - tenantW - checkW * 5;
+  const cols = [
+    { w: shopW, lines: ["Shop #"] },
+    { w: tenantW, lines: ["Tenant Name"] },
+    { w: checkW, lines: ["Sprinklers", "(stacking heights,", "obstruction)"] },
+    { w: checkW, lines: ["Signage", "(escape routes,", "equipment)"] },
+    { w: checkW, lines: ["Fire Equipment", "(extinguishers, hose", "reels, fire blankets)"] },
+    { w: checkW, lines: ["Smoke Detectors", "(operational,", "no obstruction)"] },
+    { w: checkW, lines: ["Escape Doors & Exit", "Routes (obstruction,", "break glass & keys)"] },
+    { w: commentsW, lines: ["Comments, Observations,", "Action to be taken"] },
+  ];
+
+  // Header row
+  checkY(14);
+  const hH = 14;
+  doc.setFillColor(212, 206, 194);
+  doc.rect(m, y, cW, hH, "F");
+  let x = m;
+  cols.forEach((col) => {
+    doc.setDrawColor(170, 160, 145); doc.setLineWidth(0.2);
+    doc.rect(x, y, col.w, hH);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(15, 15, 15);
+    const lh = 3.5, startY = y + (hH - col.lines.length * lh) / 2 + lh * 0.8;
+    col.lines.forEach((line, li) => doc.text(line, x + col.w / 2, startY + li * lh, { align: "center" }));
+    x += col.w;
+  });
+  y += hH;
+
+  // Data rows
+  const rowH = 8;
+  const checkKeys = ["sprinklers", "signage", "fireEquipment", "smokeDetectors", "escapeDoors"];
+  (form.rows || []).forEach((row, ri) => {
+    checkY(rowH);
+    doc.setFillColor(...(ri % 2 === 0 ? [255, 255, 255] : [250, 248, 244]));
+    doc.rect(m, y, cW, rowH, "F");
+    x = m;
+    const cells = [row.shopNo || "", row.tenantName || "", ...checkKeys.map((k) => row[k] || ""), row.comments || ""];
+    cols.forEach((col, ci) => {
+      doc.setDrawColor(195, 188, 175); doc.setLineWidth(0.15);
+      doc.rect(x, y, col.w, rowH);
+      const val = cells[ci];
+      if (ci >= 2 && ci <= 6) {
+        if (val === "pass") {
+          doc.setFillColor(220, 252, 231); doc.setDrawColor(21, 128, 61); doc.setLineWidth(0.4);
+          doc.roundedRect(x + col.w / 2 - 6, y + 2, 12, 4.5, 0.8, 0.8, "FD");
+          doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(21, 128, 61);
+          doc.text("PASS", x + col.w / 2, y + 5.3, { align: "center" });
+        } else if (val === "fail") {
+          doc.setFillColor(254, 226, 226); doc.setDrawColor(185, 28, 28); doc.setLineWidth(0.4);
+          doc.roundedRect(x + col.w / 2 - 6, y + 2, 12, 4.5, 0.8, 0.8, "FD");
+          doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(185, 28, 28);
+          doc.text("FAIL", x + col.w / 2, y + 5.3, { align: "center" });
+        } else if (val === "na") {
+          doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); doc.setTextColor(120, 120, 120);
+          doc.text("N/A", x + col.w / 2, y + 5.3, { align: "center" });
+        } else {
+          doc.setTextColor(200, 195, 188);
+          doc.text("—", x + col.w / 2, y + 5.3, { align: "center" });
+        }
+        doc.setTextColor(15, 15, 15); doc.setLineWidth(0.15);
+      } else {
+        doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(15, 15, 15);
+        doc.text(doc.splitTextToSize(val, col.w - 2)[0] || "", x + 1.5, y + 5.3);
+      }
+      x += col.w;
+    });
+    y += rowH;
+  });
+
+  // Page numbers
+  const total = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(160, 155, 145);
+    doc.text(`Page ${p} of ${total}`, pageW - m, pageH - 4, { align: "right" });
+    doc.text(`Generated ${new Date().toLocaleDateString()}`, m, pageH - 4);
+  }
+
+  return doc;
+};
+
+const BUILDING_CODES = {
+  "269 Independence": "IND",
+  "44 On Post": "ONP",
+  "Arandis Convenience Centre": "ARA",
+  "Forum Building": "FOR",
+  "Katutura Shopping Centre": "KAT",
+  "Keetmanshoop Shopping Centre": "KEE",
+  "Kenya House": "KEN",
+  "Maerua Lifestyle Shopping Centre": "MAE",
+  "Mediva House": "MED",
+  "Mutual Tower": "MUT",
+  "Ondangwa": "OND",
+  "Oshakati Shopping Centre": "OSA",
+  "Oshikango Shopping Centre": "OSK",
+  "Otjivanda Shopping Centre": "OTJ",
+  "Rehoboth Shopping Centre": "REH",
+  "Schuster House": "SCH",
+  "Windhoek Sanlam Centre": "WSC",
+};
+
+const CHECKLIST_TYPE_CODES = { "lift-rca": "LRCA", "generator-info": "GENI", "bca-site": "BCAS", "tenant-fire": "TFIRE" };
+
+const generateIncidentRef = async (building, checklistId) => {
+  const code = BUILDING_CODES[building];
+  if (!code) return "";
+  const typeCode = CHECKLIST_TYPE_CODES[checklistId] || "CHK";
+  const year = new Date().getFullYear();
+  try {
+    const { count } = await supabase
+      .from("checklist_submissions")
+      .select("*", { count: "exact", head: true })
+      .eq("building", building)
+      .eq("checklist_id", checklistId)
+      .gte("submitted_at", `${year}-01-01T00:00:00.000Z`)
+      .lt("submitted_at", `${year + 1}-01-01T00:00:00.000Z`);
+    return `${code}-${typeCode}-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
+  } catch {
+    return `${code}-${typeCode}-${year}-001`;
+  }
+};
+
 const queueBytes = (queue) => {
   try {
     return new Blob([JSON.stringify(queue)]).size;
@@ -325,8 +1275,1092 @@ const bucketByArchivedMonth = (tasks, archivedAtMap) => {
   });
 };
 
+const CHECKLIST_ID = new URLSearchParams(window.location.search).get("checklist");
+const EDIT_ID = new URLSearchParams(window.location.search).get("edit");
+
+// Registry — add future checklists here
+const CHECKLIST_REGISTRY = [
+  {
+    id: "lift-rca",
+    name: "Lift Breakdown / Maintenance",
+    description: "Root Cause Analysis & Corrective Actions for lift failure incidents",
+    category: "Mechanical",
+    FormComponent: (props) => <LiftRCASheet {...props} />,
+    generatePDF: generateChecklistPDF,
+  },
+  {
+    id: "generator-info",
+    name: "Generator Information",
+    description: "Tenant and centre generator audit: installation, diesel storage, and COC certificates",
+    category: "Electrical",
+    FormComponent: (props) => <GeneratorSheet {...props} />,
+    generatePDF: generateGeneratorPDF,
+  },
+  {
+    id: "bca-site",
+    name: "Building Condition Assessment",
+    description: "Site inspection checklist covering structural, electrical, mechanical, fire safety and compliance",
+    category: "General",
+    FormComponent: (props) => <BCASheet {...props} />,
+    generatePDF: generateBCAPDF,
+  },
+  {
+    id: "tenant-fire",
+    name: "Tenant Fire Inspection",
+    description: "Per-tenant fire safety check: sprinklers, signage, equipment, smoke detectors, escape routes",
+    category: "Fire Safety",
+    FormComponent: (props) => <TenantFireSheet {...props} />,
+    generatePDF: generateTenantFirePDF,
+  },
+];
+
+// Condition points — must stay in sync with HEALTH_SCORE_CONFIG.bca.conditionPoints in ops-tasks-dashboard.jsx
+const BCA_CONDITION_POINTS = { G: 100, F: 75, P: 25, C: 0 };
+
+function computeBCAScoreForSubmission(formData) {
+  let total = 0, count = 0;
+  Object.values(formData?.rows || {}).forEach((section) =>
+    section.forEach((item) => {
+      if (item.inspected && BCA_CONDITION_POINTS[item.condition] !== undefined) {
+        total += BCA_CONDITION_POINTS[item.condition];
+        count++;
+      }
+    })
+  );
+  return count > 0 ? Math.round((total / count) * 10) / 10 : null;
+}
+
+// ---------- Standalone edit page (loaded via ?edit=<uuid>) ----------
+function StandaloneEditPage({ submissionId }) {
+  const [submission, setSubmission] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("checklist_submissions")
+      .select("*")
+      .eq("id", submissionId)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) setNotFound(true);
+        else setSubmission(data);
+        setLoading(false);
+      });
+  }, [submissionId]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-screen">
+      <Loader2 size={24} className="animate-spin" style={{ color: "#8A7A5C" }} />
+    </div>
+  );
+
+  if (notFound) return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center">
+      <p className="font-display text-2xl mb-2" style={{ color: "#0F0F0F" }}>Report not found</p>
+      <p className="text-sm" style={{ color: "#8A7A5C" }}>This link may be invalid or the report has been removed.</p>
+    </div>
+  );
+
+  const entry = CHECKLIST_REGISTRY.find((c) => c.id === submission.checklist_id);
+  if (!entry) return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center">
+      <p className="font-display text-2xl mb-2" style={{ color: "#0F0F0F" }}>Unknown checklist type</p>
+    </div>
+  );
+
+  return (
+    <entry.FormComponent
+      webhookUrl={ENV_WEBHOOK_URL}
+      standalone
+      name={entry.name}
+      initialData={submission.form_data}
+      submissionId={submission.id}
+      onSave={async (formData, fileName, existingId) => {
+        const siteExtCount = formData?.rows?.siteExterior?.length ?? "?";
+        console.log("[BCA save] existingId:", existingId, "siteExterior items:", siteExtCount);
+        const patch = {
+          form_data: formData,
+          pdf_file_name: fileName,
+          incident_ref: formData.incidentRef ?? null,
+          building: formData.building ?? null,
+          submitted_at: new Date().toISOString(),
+        };
+        // Only add lift-specific columns if the submission is a lift checklist
+        // (these columns may not exist for other checklist types)
+        if (submission.checklist_id !== "bca-site") {
+          if (formData.liftId !== undefined) patch.lift_id = formData.liftId;
+          if (formData.dateOfFailure !== undefined) patch.date_of_failure = formData.dateOfFailure;
+        }
+        const { error } = await supabase.from("checklist_submissions").update(patch).eq("id", existingId);
+        if (error) {
+          console.error("[BCA save] Supabase error:", error);
+          throw new Error(error.message || "Save failed");
+        }
+        console.log("[BCA save] Success");
+        return existingId;
+      }}
+    />
+  );
+}
+
+// ---------- Supabase hooks: Assets + Certificates ----------
+
+function useAssets() {
+  const [assets, setAssets] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase.from("assets").select("*").order("property_name").order("name");
+      setAssets(data || []);
+    } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async (asset) => {
+    const { id, created_at, updated_at, ...fields } = asset;
+
+    // Resolve building_id from property_name so the buildings dashboard can find this asset
+    if (fields.property_name) {
+      const { data: bRow } = await supabase
+        .from("buildings").select("id").eq("name", fields.property_name).single();
+      fields.building_id = bRow?.id || null;
+    }
+
+    if (id) {
+      const { error } = await supabase.from("assets").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("assets").insert(fields);
+      if (error) throw error;
+    }
+    await load();
+  };
+  const remove = async (id) => {
+    await supabase.from("assets").delete().eq("id", id);
+    setAssets((p) => p.filter((a) => a.id !== id));
+  };
+  return { assets, loading, load, save, remove };
+}
+
+function useCertificates() {
+  const [certs, setCerts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase.from("compliance_certificates").select("*, assets(name)").order("expiry_date");
+      setCerts(data || []);
+    } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async (cert) => {
+    const { id, created_at, assets: _j, ...fields } = cert;
+    if (id) {
+      const { error } = await supabase.from("compliance_certificates").update(fields).eq("id", id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("compliance_certificates").insert(fields);
+      if (error) throw error;
+    }
+    await load();
+  };
+  const remove = async (id) => {
+    await supabase.from("compliance_certificates").delete().eq("id", id);
+    setCerts((p) => p.filter((c) => c.id !== id));
+  };
+  return { certs, loading, load, save, remove };
+}
+
+const PM_FREQUENCY_UNITS = ["days", "weeks", "months", "years"];
+
+function usePMSchedules() {
+  const [schedules, setSchedules] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await supabase
+        .from("pm_schedules")
+        .select("*, assets(name, asset_type)")
+        .order("next_due_date");
+      setSchedules(data || []);
+    } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async (schedule) => {
+    const { id, created_at, updated_at, assets: _j, ...fields } = schedule;
+    if (id) {
+      const { error } = await supabase.from("pm_schedules").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("pm_schedules").insert(fields);
+      if (error) throw error;
+    }
+    await load();
+  };
+  const remove = async (id) => {
+    await supabase.from("pm_schedules").delete().eq("id", id);
+    setSchedules((p) => p.filter((s) => s.id !== id));
+  };
+  const toggle = async (id, active) => {
+    await supabase.from("pm_schedules").update({ active, updated_at: new Date().toISOString() }).eq("id", id);
+    setSchedules((p) => p.map((s) => s.id === id ? { ...s, active } : s));
+  };
+  return { schedules, loading, load, save, remove, toggle };
+}
+
+// ---------- Priority badge ----------
+
+function PriorityBadge({ priority, size = "sm" }) {
+  const p = PRIORITIES[priority];
+  if (!p) return null;
+  const pad = size === "sm" ? "1px 5px" : "2px 8px";
+  const fs = size === "sm" ? "9px" : "11px";
+  return (
+    <span style={{ padding: pad, borderRadius: 4, fontSize: fs, fontWeight: 700, letterSpacing: "0.04em", background: p.bg, color: p.color, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}>
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: p.dot, display: "inline-block", flexShrink: 0 }} />
+      {p.label.toUpperCase()}
+    </span>
+  );
+}
+
+// ---------- Asset Form ----------
+
+function AssetForm({ asset, propertyOptions, onSave, onCancel }) {
+  const isNew = !asset.id;
+  const [form, setForm] = useState({
+    property_name: asset.property_name || propertyOptions[0] || "",
+    name: asset.name || "",
+    asset_type: asset.asset_type || ASSET_TYPE_GROUPS[0].types[0],
+    manufacturer: asset.manufacturer || "",
+    model: asset.model || "",
+    serial_number: asset.serial_number || "",
+    install_date: asset.install_date || "",
+    warranty_expiry: asset.warranty_expiry || "",
+    service_contract_vendor: asset.service_contract_vendor || "",
+    service_contract_expiry: asset.service_contract_expiry || "",
+    status: asset.status || "operational",
+    notes: asset.notes || "",
+    ...(asset.id ? { id: asset.id } : {}),
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.property_name && form.name.trim() && form.asset_type;
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try { await onSave({ ...form, name: form.name.trim() }); }
+    catch (e) { alert("Save failed: " + e.message); setSaving(false); }
+  };
+  const LabelInput = ({ label, field, type = "text", placeholder = "" }) => (
+    <div className="mb-3">
+      <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>{label}</p>
+      <input type={type} value={form[field]} onChange={(e) => set(field, e.target.value)} placeholder={placeholder}
+        className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+    </div>
+  );
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col" style={{ background: "#FAF6EE" }}>
+      <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
+        <button onClick={onCancel} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
+        <span className="font-semibold text-sm">{isNew ? "New Asset" : "Edit Asset"}</span>
+        <button onClick={handleSave} disabled={!valid || saving} className="text-sm font-semibold" style={{ color: (valid && !saving) ? "#0F0F0F" : "#D4C7B0" }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 scrollbar-hide">
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Property</p>
+          <select value={form.property_name} onChange={(e) => set("property_name", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <LabelInput label="Asset Name" field="name" placeholder="e.g. Lift 1 — East Wing" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Asset Type</p>
+          <select value={form.asset_type} onChange={(e) => set("asset_type", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {ASSET_TYPE_GROUPS.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {g.types.map((t) => <option key={t} value={t}>{t}</option>)}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Status</p>
+          <div className="flex gap-2">
+            {["operational", "down", "decommissioned"].map((s) => (
+              <button key={s} onClick={() => set("status", s)} className="px-3 py-1.5 rounded-lg text-xs font-semibold capitalize"
+                style={{ background: form.status === s ? "#0F0F0F" : "white", color: form.status === s ? "white" : "#374151", border: "1px solid rgba(0,0,0,0.08)" }}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+        <LabelInput label="Manufacturer" field="manufacturer" />
+        <LabelInput label="Model" field="model" />
+        <LabelInput label="Serial Number" field="serial_number" />
+        <LabelInput label="Install Date" field="install_date" type="date" />
+        <LabelInput label="Warranty Expiry" field="warranty_expiry" type="date" />
+        <LabelInput label="Service Contract Vendor" field="service_contract_vendor" />
+        <LabelInput label="Service Contract Expiry" field="service_contract_expiry" type="date" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Notes</p>
+          <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={3} placeholder="Any additional notes…"
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Certificate Form ----------
+
+function CertForm({ cert, propertyOptions, assets, onSave, onCancel }) {
+  const isNew = !cert.id;
+  const [form, setForm] = useState({
+    property_name: cert.property_name || propertyOptions[0] || "",
+    asset_id: cert.asset_id || "",
+    cert_type: cert.cert_type || CERT_TYPES[0],
+    cert_number: cert.cert_number || "",
+    issued_by: cert.issued_by || "",
+    issue_date: cert.issue_date || "",
+    expiry_date: cert.expiry_date || "",
+    document_url: cert.document_url || "",
+    notes: cert.notes || "",
+    ...(cert.id ? { id: cert.id } : {}),
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.property_name && form.cert_type && form.expiry_date;
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try { await onSave({ ...form, asset_id: form.asset_id || null }); }
+    catch (e) { alert("Save failed: " + e.message); setSaving(false); }
+  };
+  const propAssets = assets.filter((a) => a.property_name === form.property_name);
+  const LabelInput = ({ label, field, type = "text", placeholder = "" }) => (
+    <div className="mb-3">
+      <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>{label}</p>
+      <input type={type} value={form[field]} onChange={(e) => set(field, e.target.value)} placeholder={placeholder}
+        className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+    </div>
+  );
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col" style={{ background: "#FAF6EE" }}>
+      <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
+        <button onClick={onCancel} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
+        <span className="font-semibold text-sm">{isNew ? "New Certificate" : "Edit Certificate"}</span>
+        <button onClick={handleSave} disabled={!valid || saving} className="text-sm font-semibold" style={{ color: (valid && !saving) ? "#0F0F0F" : "#D4C7B0" }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 scrollbar-hide">
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Property</p>
+          <select value={form.property_name} onChange={(e) => { set("property_name", e.target.value); set("asset_id", ""); }} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Certificate Type</p>
+          <select value={form.cert_type} onChange={(e) => set("cert_type", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {CERT_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Linked Asset (optional)</p>
+          <select value={form.asset_id} onChange={(e) => set("asset_id", e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            <option value="">— Property-wide —</option>
+            {propAssets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <LabelInput label="Certificate Number" field="cert_number" />
+        <LabelInput label="Issued By" field="issued_by" />
+        <LabelInput label="Issue Date" field="issue_date" type="date" />
+        <LabelInput label="Expiry Date *" field="expiry_date" type="date" />
+        <LabelInput label="Document URL" field="document_url" type="url" placeholder="https://…" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Notes</p>
+          <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={3} className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- PM Schedule Form ----------
+
+function PMScheduleForm({ schedule, propertyOptions, assets, teamOptions, onSave, onCancel }) {
+  const isNew = !schedule.id;
+  const [form, setForm] = useState({
+    property_name: schedule.property_name || propertyOptions[0] || "",
+    asset_id: schedule.asset_id || "",
+    title: schedule.title || "",
+    description: schedule.description || "",
+    priority: schedule.priority || "medium",
+    assigned_to: schedule.assigned_to || teamOptions[0] || "",
+    frequency_value: schedule.frequency_value || 3,
+    frequency_unit: schedule.frequency_unit || "months",
+    lead_time_days: schedule.lead_time_days ?? 0,
+    next_due_date: schedule.next_due_date || "",
+    active: schedule.active !== false,
+    ...(schedule.id ? { id: schedule.id } : {}),
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.property_name && form.title.trim() && form.next_due_date && form.frequency_value > 0;
+  const propAssets = assets.filter((a) => a.property_name === form.property_name);
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      await onSave({ ...form, title: form.title.trim(), asset_id: form.asset_id || null, frequency_value: Number(form.frequency_value), lead_time_days: Number(form.lead_time_days) });
+    } catch (e) { alert("Save failed: " + e.message); setSaving(false); }
+  };
+  const LabelInput = ({ label, field, type = "text", placeholder = "" }) => (
+    <div className="mb-3">
+      <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>{label}</p>
+      <input type={type} value={form[field]} onChange={(e) => set(field, e.target.value)} placeholder={placeholder}
+        className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+    </div>
+  );
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col" style={{ background: "#FAF6EE" }}>
+      <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
+        <button onClick={onCancel} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
+        <span className="font-semibold text-sm">{isNew ? "New PM Schedule" : "Edit PM Schedule"}</span>
+        <button onClick={handleSave} disabled={!valid || saving} className="text-sm font-semibold" style={{ color: (valid && !saving) ? "#0F0F0F" : "#D4C7B0" }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 scrollbar-hide">
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Property</p>
+          <select value={form.property_name} onChange={(e) => { set("property_name", e.target.value); set("asset_id", ""); }}
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <LabelInput label="Task Title" field="title" placeholder="e.g. Generator Service" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Description (optional)</p>
+          <textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={2} placeholder="Service instructions or scope…"
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Linked Asset (optional)</p>
+          <select value={form.asset_id} onChange={(e) => set("asset_id", e.target.value)}
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            <option value="">— None —</option>
+            {propAssets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Frequency</p>
+          <div className="flex gap-2">
+            <input type="number" min={1} max={365} value={form.frequency_value} onChange={(e) => set("frequency_value", e.target.value)}
+              className="w-20 rounded-xl px-3 py-2 text-sm text-center outline-none font-semibold" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+            <select value={form.frequency_unit} onChange={(e) => set("frequency_unit", e.target.value)}
+              className="flex-1 rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+              {PM_FREQUENCY_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <p className="text-xs mt-1" style={{ color: "#8A7A5C" }}>
+            Every {form.frequency_value} {form.frequency_unit}
+          </p>
+        </div>
+        <LabelInput label="Next Due Date *" field="next_due_date" type="date" />
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Lead Time (days before due to generate task)</p>
+          <input type="number" min={0} max={90} value={form.lead_time_days} onChange={(e) => set("lead_time_days", e.target.value)}
+            className="w-24 rounded-xl px-3 py-2 text-sm text-center outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }} />
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Assigned To</p>
+          <select value={form.assigned_to} onChange={(e) => set("assigned_to", e.target.value)}
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+            <option value="">— Unassigned —</option>
+            {teamOptions.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs mb-1 uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Priority</p>
+          <div className="flex gap-1.5 flex-wrap">
+            {PRIORITY_KEYS.map((pk) => {
+              const p = PRIORITIES[pk];
+              const active = form.priority === pk;
+              return (
+                <button key={pk} type="button" onClick={() => set("priority", pk)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+                  style={{ background: active ? p.bg : "white", color: active ? p.color : "#6B7280", border: `1px solid ${active ? p.dot : "rgba(0,0,0,0.08)"}` }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.dot, display: "inline-block" }} />
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {!isNew && (
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-xl" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+            <span className="text-sm font-medium" style={{ color: "#0F0F0F" }}>Active schedule</span>
+            <button onClick={() => set("active", !form.active)} className="w-10 h-6 rounded-full transition-colors relative"
+              style={{ background: form.active ? "#0F0F0F" : "#E5E7EB" }}>
+              <span className="absolute top-1 transition-all w-4 h-4 rounded-full bg-white" style={{ left: form.active ? "22px" : "4px" }} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Register Sheet (Assets + Certificates + PM) ----------
+
+function certExpiryStatus(expiryDate) {
+  if (!expiryDate) return { color: "#9CA3AF", label: "Unknown" };
+  const days = (new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24);
+  if (days < 0) return { color: "#B91C1C", bg: "#FEE2E2", label: "Expired" };
+  if (days < 30) return { color: "#B45309", bg: "#FEF3C7", label: `${Math.ceil(days)}d left` };
+  return { color: "#15803D", bg: "#DCFCE7", label: "Valid" };
+}
+
+function assetStatusStyle(status) {
+  if (status === "down") return { color: "#B91C1C", bg: "#FEE2E2" };
+  if (status === "decommissioned") return { color: "#6B7280", bg: "#F3F4F6" };
+  return { color: "#15803D", bg: "#DCFCE7" };
+}
+
+function RegisterSheet({ onClose, propertyOptions, teamOptions }) {
+  const { assets, loading: assetsLoading, save: saveAsset, remove: removeAsset } = useAssets();
+  const { certs, loading: certsLoading, save: saveCert, remove: removeCert } = useCertificates();
+  const { schedules, loading: pmLoading, save: savePM, remove: removePM, toggle: togglePM } = usePMSchedules();
+  const [tab, setTab] = useState("assets");
+  const [editingAsset, setEditingAsset] = useState(null);
+  const [editingCert, setEditingCert] = useState(null);
+  const [editingPM, setEditingPM] = useState(null);
+  const [filterProp, setFilterProp] = useState("All");
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  if (editingAsset !== null) {
+    return <AssetForm asset={editingAsset} propertyOptions={propertyOptions} onSave={async (a) => { await saveAsset(a); setEditingAsset(null); }} onCancel={() => setEditingAsset(null)} />;
+  }
+  if (editingCert !== null) {
+    return <CertForm cert={editingCert} propertyOptions={propertyOptions} assets={assets} onSave={async (c) => { await saveCert(c); setEditingCert(null); }} onCancel={() => setEditingCert(null)} />;
+  }
+  if (editingPM !== null) {
+    return <PMScheduleForm schedule={editingPM} propertyOptions={propertyOptions} assets={assets} teamOptions={teamOptions} onSave={async (s) => { await savePM(s); setEditingPM(null); }} onCancel={() => setEditingPM(null)} />;
+  }
+
+  const filteredAssets = filterProp === "All" ? assets : assets.filter((a) => a.property_name === filterProp);
+  const filteredCerts = filterProp === "All" ? certs : certs.filter((c) => c.property_name === filterProp);
+  const filteredSchedules = filterProp === "All" ? schedules : schedules.filter((s) => s.property_name === filterProp);
+
+  const expiringSoon = certs.filter((c) => {
+    if (!c.expiry_date) return false;
+    const days = (new Date(c.expiry_date) - new Date()) / (1000 * 60 * 60 * 24);
+    return days >= 0 && days < 30;
+  }).length;
+  const expired = certs.filter((c) => c.expiry_date && new Date(c.expiry_date) < new Date()).length;
+
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col sheet-anim" style={{ background: "#FAF6EE" }}>
+      <div className="px-5 pt-5 pb-3">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+            <X size={16} />
+          </button>
+          <span className="font-display text-lg" style={{ color: "#0F0F0F" }}>Property Register</span>
+          <button
+            onClick={() => tab === "assets" ? setEditingAsset({}) : tab === "certs" ? setEditingCert({}) : setEditingPM({})}
+            className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95"
+            style={{ background: "#0F0F0F", color: "white" }}
+          >
+            <Plus size={16} />
+          </button>
+        </div>
+
+        {(expired > 0 || expiringSoon > 0) && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-3" style={{ background: expired > 0 ? "#FEE2E2" : "#FEF3C7", border: `1px solid ${expired > 0 ? "rgba(185,28,28,0.15)" : "rgba(180,83,9,0.15)"}` }}>
+            <AlertTriangle size={13} style={{ color: expired > 0 ? "#B91C1C" : "#B45309", flexShrink: 0 }} />
+            <span className="text-xs font-medium" style={{ color: expired > 0 ? "#B91C1C" : "#B45309" }}>
+              {expired > 0 ? `${expired} expired cert${expired > 1 ? "s" : ""}` : ""}
+              {expired > 0 && expiringSoon > 0 ? " · " : ""}
+              {expiringSoon > 0 ? `${expiringSoon} expiring within 30 days` : ""}
+            </span>
+          </div>
+        )}
+
+        <div className="flex gap-1 mb-3">
+          {[
+            { id: "assets", label: "Assets", icon: <Wrench size={11} /> },
+            { id: "certs", label: "Certs", icon: <ShieldCheck size={11} /> },
+            { id: "pm", label: "PM", icon: <RepeatIcon size={11} /> },
+          ].map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{ background: tab === t.id ? "#0F0F0F" : "white", color: tab === t.id ? "white" : "#8A7A5C", border: "1px solid rgba(0,0,0,0.07)" }}>
+              {t.icon}{t.label}
+            </button>
+          ))}
+        </div>
+
+        <select value={filterProp} onChange={(e) => setFilterProp(e.target.value)} className="w-full rounded-xl px-3 py-2 text-sm outline-none" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)", color: "#0F0F0F" }}>
+          <option value="All">All properties</option>
+          {propertyOptions.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-5 pb-8">
+        {tab === "assets" ? (
+          assetsLoading ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} /></div>
+          ) : filteredAssets.length === 0 ? (
+            <div className="text-center py-12">
+              <Wrench size={28} style={{ color: "#D4C7B0", margin: "0 auto 8px" }} />
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>No assets yet. Tap + to add one.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+              {filteredAssets.map((a, i) => {
+                const st = assetStatusStyle(a.status);
+                const warrantyDays = a.warranty_expiry ? (new Date(a.warranty_expiry) - new Date()) / (1000 * 60 * 60 * 24) : null;
+                const warrantyExp = warrantyDays !== null && warrantyDays < 60;
+                return (
+                  <div key={a.id} onClick={() => setEditingAsset(a)} className="flex items-start gap-3 px-4 py-3 cursor-pointer active:bg-black/[0.02] transition-colors"
+                    style={{ borderBottom: i < filteredAssets.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none" }}>
+                    <div className="mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#FAF6EE" }}>
+                      <Wrench size={14} style={{ color: "#8A7A5C" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium" style={{ color: "#0F0F0F" }}>{a.name}</p>
+                        <span className="text-xs px-1.5 py-0.5 rounded-md font-semibold capitalize" style={{ fontSize: "9px", ...st }}>{a.status}</span>
+                      </div>
+                      <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>{a.asset_type} · {a.property_name}</p>
+                      {a.serial_number && <p className="text-xs mt-0.5 font-mono" style={{ color: "#9CA3AF" }}>S/N: {a.serial_number}</p>}
+                      {warrantyExp && (
+                        <p className="text-xs mt-1 font-medium" style={{ color: warrantyDays < 0 ? "#B91C1C" : "#B45309" }}>
+                          {warrantyDays < 0 ? "Warranty expired" : `Warranty exp. ${Math.ceil(warrantyDays)}d`}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronRight size={14} style={{ color: "#D4C7B0", flexShrink: 0, marginTop: 3 }} />
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : tab === "certs" ? (
+          certsLoading ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} /></div>
+          ) : filteredCerts.length === 0 ? (
+            <div className="text-center py-12">
+              <ShieldCheck size={28} style={{ color: "#D4C7B0", margin: "0 auto 8px" }} />
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>No certificates yet. Tap + to add one.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+              {filteredCerts.map((c, i) => {
+                const exp = certExpiryStatus(c.expiry_date);
+                const linkedAsset = c.assets?.name;
+                return (
+                  <div key={c.id} onClick={() => setEditingCert(c)} className="flex items-start gap-3 px-4 py-3 cursor-pointer active:bg-black/[0.02] transition-colors"
+                    style={{ borderBottom: i < filteredCerts.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none" }}>
+                    <div className="mt-1 w-3 h-3 rounded-full flex-shrink-0" style={{ background: exp.color }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium" style={{ color: "#0F0F0F" }}>{c.cert_type}</p>
+                        <span className="text-xs px-1.5 py-0.5 rounded-md font-semibold" style={{ fontSize: "9px", background: exp.bg || "#F3F4F6", color: exp.color }}>{exp.label}</span>
+                      </div>
+                      <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>
+                        {c.property_name}{linkedAsset ? ` · ${linkedAsset}` : ""}
+                      </p>
+                      {c.cert_number && <p className="text-xs font-mono mt-0.5" style={{ color: "#9CA3AF" }}>{c.cert_number}</p>}
+                      {c.expiry_date && <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Expires {new Date(c.expiry_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>}
+                    </div>
+                    <ChevronRight size={14} style={{ color: "#D4C7B0", flexShrink: 0, marginTop: 3 }} />
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          pmLoading ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} /></div>
+          ) : filteredSchedules.length === 0 ? (
+            <div className="text-center py-12">
+              <RepeatIcon size={28} style={{ color: "#D4C7B0", margin: "0 auto 8px" }} />
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>No PM schedules yet. Tap + to add one.</p>
+              <p className="text-xs mt-1" style={{ color: "#D4C7B0" }}>n8n will auto-generate tasks from active schedules daily.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+              {filteredSchedules.map((s, i) => {
+                const daysUntil = s.next_due_date ? Math.ceil((new Date(s.next_due_date) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+                const isOverdue = daysUntil !== null && daysUntil < 0;
+                const isSoon = daysUntil !== null && daysUntil >= 0 && daysUntil <= 14;
+                const dueBadgeColor = isOverdue ? "#B91C1C" : isSoon ? "#B45309" : "#15803D";
+                const dueBadgeBg = isOverdue ? "#FEE2E2" : isSoon ? "#FEF3C7" : "#DCFCE7";
+                return (
+                  <div key={s.id} className="px-4 py-3 cursor-pointer active:bg-black/[0.02] transition-colors"
+                    style={{ borderBottom: i < filteredSchedules.length - 1 ? "1px solid rgba(0,0,0,0.05)" : "none", opacity: s.active ? 1 : 0.45 }}
+                    onClick={() => setEditingPM(s)}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium" style={{ color: "#0F0F0F" }}>{s.title}</p>
+                          {!s.active && <span className="text-xs px-1.5 py-0.5 rounded-md" style={{ fontSize: "9px", background: "#F3F4F6", color: "#6B7280", fontWeight: 700 }}>PAUSED</span>}
+                        </div>
+                        <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>
+                          {s.property_name}{s.assets?.name ? ` · ${s.assets.name}` : ""}
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>
+                          Every {s.frequency_value} {s.frequency_unit}
+                          {s.assigned_to ? ` · ${s.assigned_to}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        {s.next_due_date && (
+                          <span className="text-xs px-1.5 py-0.5 rounded-md font-semibold" style={{ fontSize: "9px", background: dueBadgeBg, color: dueBadgeColor }}>
+                            {isOverdue ? `${Math.abs(daysUntil)}d overdue` : daysUntil === 0 ? "Due today" : `${daysUntil}d`}
+                          </span>
+                        )}
+                        {s.next_due_date && (
+                          <p className="text-xs" style={{ color: "#9CA3AF" }}>{new Date(s.next_due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+      </div>
+      {confirmDelete && (
+        <div className="absolute inset-0 z-10 flex items-end" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="w-full rounded-t-3xl px-5 py-6" style={{ background: "white" }}>
+            <p className="font-semibold mb-1" style={{ color: "#0F0F0F" }}>Delete this item?</p>
+            <p className="text-sm mb-4" style={{ color: "#8A7A5C" }}>This cannot be undone.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#F3F4F6", color: "#374151" }}>Cancel</button>
+              <button onClick={async () => { await confirmDelete.fn(); setConfirmDelete(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#B91C1C", color: "white" }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Analytics ----------
+const PERSON_PALETTE = ["#0F4C5C","#7C3AED","#EA580C","#0284C7","#BE185D","#15803D","#B45309","#6366F1"];
+
+function StatCard({ label, value, sub, color }) {
+  return (
+    <div className="rounded-xl p-3 flex flex-col gap-0.5" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+      <span className="text-2xl font-bold leading-none" style={{ color }}>{value}</span>
+      {sub && <span className="text-xs font-medium" style={{ color }}>{sub}</span>}
+      <span className="text-xs leading-tight mt-0.5" style={{ color: "#8A7A5C" }}>{label}</span>
+    </div>
+  );
+}
+
+function CompletionsChart({ months, assignees, personColor, maxCount }) {
+  if (assignees.length === 0 || maxCount === 0) {
+    return <p className="text-sm text-center py-8" style={{ color: "#8A7A5C" }}>No completed tasks in this period</p>;
+  }
+  const W = 520, H = 180, ML = 28, MB = 22, MR = 8, MT = 8;
+  const plotW = W - ML - MR, plotH = H - MT - MB;
+  const monthW = plotW / months.length;
+  const barW = Math.max(8, monthW - 10);
+  const gridMax = Math.max(Math.ceil(maxCount / 2) * 2, 2);
+  const ticks = [0, Math.round(gridMax / 2), gridMax];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ overflow: "visible" }}>
+      {ticks.map((tick) => {
+        const y = MT + plotH - (tick / gridMax) * plotH;
+        return (
+          <g key={tick}>
+            <line x1={ML} y1={y} x2={W - MR} y2={y} stroke="rgba(0,0,0,0.07)" strokeWidth="1" />
+            <text x={ML - 4} y={y + 4} textAnchor="end" fontSize="9" fill="#9CA3AF">{tick}</text>
+          </g>
+        );
+      })}
+      {months.map((m, mi) => {
+        const barX = ML + mi * monthW + (monthW - barW) / 2;
+        const segments = [];
+        let stackY = MT + plotH;
+        assignees.forEach((a) => {
+          const count = m.counts[a] || 0;
+          if (count > 0) {
+            const bh = Math.max(2, (count / gridMax) * plotH);
+            stackY -= bh;
+            segments.push({ a, y: stackY, bh });
+          }
+        });
+        return (
+          <g key={m.key}>
+            {segments.map(({ a, y: sy, bh }) => (
+              <rect key={a} x={barX} y={sy} width={barW} height={bh} rx="2"
+                fill={personColor[a] || "#888"} />
+            ))}
+            <text x={ML + mi * monthW + monthW / 2} y={H - 4}
+              textAnchor="middle" fontSize="9" fill="#9CA3AF">{m.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function OutstandingChart({ data, maxCount, personColor }) {
+  const ROW_H = 36, LABEL_W = 68, COUNT_W = 28;
+  const H = data.length * ROW_H + 4;
+  return (
+    <svg viewBox={`0 0 ${LABEL_W + 400 + COUNT_W} ${H}`} className="w-full">
+      {data.map((row, i) => {
+        const y = i * ROW_H + ROW_H / 2 + 2;
+        const color = personColor[row.assignee] || "#888";
+        const pendingW = (row.pending / maxCount) * 400;
+        const ipW = (row.inProgress / maxCount) * 400;
+        return (
+          <g key={row.assignee}>
+            <text x={LABEL_W - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#374151">{row.assignee.split(" ")[0]}</text>
+            {row.pending > 0 && <rect x={LABEL_W} y={y - 7} width={pendingW} height={13} rx="3" fill={color} opacity="0.95" />}
+            {row.inProgress > 0 && <rect x={LABEL_W + pendingW} y={y - 7} width={ipW} height={13} rx="3" fill={color} opacity="0.4" />}
+            <text x={LABEL_W + pendingW + ipW + 6} y={y + 4} fontSize="10" fill="#6B7280">{row.total}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function BuildingChart({ data }) {
+  if (data.length === 0) return null;
+  const ROW_H = 34, LABEL_W = 88, BAR_AREA = 360, COUNT_W = 28;
+  const maxTotal = Math.max(...data.map((r) => r.total), 1);
+  const H = data.length * ROW_H + 4;
+  const shortName = (p) => {
+    const first = p.split(" ")[0];
+    return first.length > 10 ? first.slice(0, 9) + "…" : first;
+  };
+  return (
+    <svg viewBox={`0 0 ${LABEL_W + BAR_AREA + COUNT_W} ${H}`} className="w-full" style={{ overflow: "visible" }}>
+      {data.map((row, i) => {
+        const y = i * ROW_H + ROW_H / 2 + 2;
+        const doneW = (row.done / maxTotal) * BAR_AREA;
+        const ipW = (row.inProgress / maxTotal) * BAR_AREA;
+        const pendingW = (row.pending / maxTotal) * BAR_AREA;
+        const filled = doneW + ipW + pendingW;
+        return (
+          <g key={row.property}>
+            <text x={LABEL_W - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#374151">{shortName(row.property)}</text>
+            <rect x={LABEL_W} y={y - 7} width={BAR_AREA} height={13} rx="3" fill="rgba(0,0,0,0.04)" />
+            {row.done > 0 && <rect x={LABEL_W} y={y - 7} width={doneW} height={13} rx="2" fill="#15803D" />}
+            {row.inProgress > 0 && <rect x={LABEL_W + doneW} y={y - 7} width={ipW} height={13} rx="2" fill="#1D4ED8" opacity="0.75" />}
+            {row.pending > 0 && <rect x={LABEL_W + doneW + ipW} y={y - 7} width={pendingW} height={13} rx="2" fill="#B45309" opacity="0.75" />}
+            <text x={LABEL_W + filled + 6} y={y + 4} fontSize="10" fill="#6B7280">{row.total}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function AnalyticsView({ tasks, archivedAtMap }) {
+  const now = new Date();
+
+  const assignees = useMemo(
+    () => [...new Set(tasks.map((t) => t.assignee).filter(Boolean))].sort(),
+    [tasks]
+  );
+
+  const personColor = useMemo(
+    () => Object.fromEntries(assignees.map((a, i) => [a, PERSON_PALETTE[i % PERSON_PALETTE.length]])),
+    [assignees]
+  );
+
+  const months = useMemo(() => {
+    return Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+        label: d.toLocaleDateString("en-GB", { month: "short" }),
+        year: d.getFullYear(),
+        month: d.getMonth(),
+      };
+    });
+  }, []);
+
+  const completionsByMonth = useMemo(() => {
+    return months.map((m) => {
+      const counts = {};
+      tasks.forEach((t) => {
+        if (t.status !== "Done" && t.status !== "Archived") return;
+        const raw = archivedAtMap[t.id] || t.dueDate;
+        if (!raw) return;
+        const d = new Date(raw);
+        if (isNaN(d)) return;
+        if (d.getFullYear() === m.year && d.getMonth() === m.month) {
+          const key = t.assignee || "Unassigned";
+          counts[key] = (counts[key] || 0) + 1;
+        }
+      });
+      return { ...m, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) };
+    });
+  }, [tasks, archivedAtMap, months]);
+
+  const outstandingByPerson = useMemo(() => {
+    const data = {};
+    tasks.forEach((t) => {
+      if (t.status !== "Pending" && t.status !== "In Progress") return;
+      const key = t.assignee || "Unassigned";
+      if (!data[key]) data[key] = { pending: 0, inProgress: 0 };
+      if (t.status === "Pending") data[key].pending++;
+      else data[key].inProgress++;
+    });
+    return Object.entries(data)
+      .map(([assignee, v]) => ({ assignee, ...v, total: v.pending + v.inProgress }))
+      .sort((a, b) => b.total - a.total);
+  }, [tasks]);
+
+  const activeAssignees = useMemo(() => {
+    const s = new Set();
+    completionsByMonth.forEach((m) => Object.keys(m.counts).forEach((k) => s.add(k)));
+    outstandingByPerson.forEach((r) => s.add(r.assignee));
+    return [...s].sort();
+  }, [completionsByMonth, outstandingByPerson]);
+
+  const tasksByBuilding = useMemo(() => {
+    const data = {};
+    tasks.forEach((t) => {
+      const key = t.property || "Unknown";
+      if (!data[key]) data[key] = { done: 0, inProgress: 0, pending: 0 };
+      if (t.status === DONE_STATUS || t.status === ARCHIVED_STATUS) data[key].done++;
+      else if (t.status === "In Progress") data[key].inProgress++;
+      else if (t.status === "Pending") data[key].pending++;
+    });
+    return Object.entries(data)
+      .map(([property, v]) => ({ property, ...v, total: v.done + v.inProgress + v.pending }))
+      .sort((a, b) => b.total - a.total);
+  }, [tasks]);
+
+  const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const thisMonthData = completionsByMonth.find((m) => m.key === thisMonthKey);
+  const completedThisMonth = thisMonthData?.total || 0;
+  const totalOutstanding = outstandingByPerson.reduce((a, r) => a + r.total, 0);
+  const topEntry = thisMonthData ? Object.entries(thisMonthData.counts).sort((a, b) => b[1] - a[1])[0] : null;
+  const maxMonthCount = Math.max(...completionsByMonth.map((m) => m.total), 1);
+  const maxOutstanding = Math.max(...outstandingByPerson.map((r) => r.total), 1);
+
+  return (
+    <div className="px-4 py-4 pb-8">
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <StatCard label="Completed this month" value={completedThisMonth} color="#15803D" />
+        <StatCard label="Outstanding" value={totalOutstanding} color="#B45309" />
+        <StatCard
+          label="Top this month"
+          value={topEntry ? topEntry[0].split(" ")[0] : "—"}
+          sub={topEntry ? `${topEntry[1]} task${topEntry[1] !== 1 ? "s" : ""}` : ""}
+          color="#0F4C5C"
+        />
+      </div>
+
+      <div className="rounded-2xl p-4 mb-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+        <p className="text-sm font-semibold mb-0.5" style={{ color: "#0F0F0F" }}>Completions by Month</p>
+        <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Done & archived tasks — last 6 months</p>
+        <CompletionsChart months={completionsByMonth} assignees={activeAssignees} personColor={personColor} maxCount={maxMonthCount} />
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+          {activeAssignees.map((a) => (
+            <div key={a} className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: personColor[a] || "#888" }} />
+              <span className="text-xs" style={{ color: "#6B7280" }}>{a.split(" ")[0]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl p-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+        <p className="text-sm font-semibold mb-0.5" style={{ color: "#0F0F0F" }}>Outstanding Tasks</p>
+        <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>
+          <span style={{ opacity: 0.9 }}>■</span> Pending &nbsp;
+          <span style={{ opacity: 0.4 }}>■</span> In Progress
+        </p>
+        {outstandingByPerson.length === 0 ? (
+          <p className="text-sm text-center py-6" style={{ color: "#8A7A5C" }}>All caught up — no outstanding tasks</p>
+        ) : (
+          <OutstandingChart data={outstandingByPerson} maxCount={maxOutstanding} personColor={personColor} />
+        )}
+      </div>
+
+      <div className="rounded-2xl p-4 mt-4" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+        <p className="text-sm font-semibold mb-0.5" style={{ color: "#0F0F0F" }}>Tasks by Building</p>
+        <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>
+          <span style={{ color: "#15803D" }}>■</span> Done{" "}
+          <span className="mx-1" style={{ color: "#1D4ED8", opacity: 0.75 }}>■</span> In Progress{" "}
+          <span className="mx-1" style={{ color: "#B45309", opacity: 0.75 }}>■</span> Pending
+        </p>
+        {tasksByBuilding.length === 0 ? (
+          <p className="text-sm text-center py-6" style={{ color: "#8A7A5C" }}>No task data</p>
+        ) : (
+          <BuildingChart data={tasksByBuilding} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------- Main ----------
 export default function App() {
+  // Standalone public checklist — no auth, no task board
+  if (CHECKLIST_ID || EDIT_ID) {
+    const entry = CHECKLIST_ID ? CHECKLIST_REGISTRY.find((c) => c.id === CHECKLIST_ID) : null;
+    return (
+      <div className="min-h-screen w-full" style={{ background: "#FAF6EE" }}>
+        <style>{`
+          .font-display { font-family: 'Fraunces', Georgia, serif; font-optical-sizing: auto; }
+          .scrollbar-hide::-webkit-scrollbar { display: none; }
+          .scrollbar-hide { scrollbar-width: none; }
+        `}</style>
+        {EDIT_ID ? (
+          <StandaloneEditPage submissionId={EDIT_ID} />
+        ) : entry ? (
+          <entry.FormComponent
+            webhookUrl={ENV_WEBHOOK_URL}
+            standalone
+            name={entry.name}
+            onSave={async (formData, fileName) => {
+              const { data } = await supabase
+                .from("checklist_submissions")
+                .insert({
+                  checklist_id: entry.id,
+                  incident_ref: formData.incidentRef,
+                  building: formData.building,
+                  lift_id: formData.liftId,
+                  date_of_failure: formData.dateOfFailure,
+                  submitted_at: new Date().toISOString(),
+                  pdf_file_name: fileName,
+                  form_data: formData,
+                })
+                .select("id")
+                .single();
+              return data?.id || null;
+            }}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center">
+            <p className="font-display text-2xl mb-2" style={{ color: "#0F0F0F" }}>Checklist not found</p>
+            <p className="text-sm" style={{ color: "#8A7A5C" }}>This link may be invalid or the checklist has been removed.</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Clear stale localStorage when seed data version changes.
   (() => {
     try {
@@ -345,11 +2379,33 @@ export default function App() {
   const [pendingQueue, setPendingQueue] = usePersistedState("ops.pendingChanges", []);
   const [csvOverride, setCsvOverride] = usePersistedState("ops.csvUrl", "");
   const [webhookOverride, setWebhookOverride] = usePersistedState("ops.webhookUrl", "");
+  const [passwordOverride, setPasswordOverride] = usePersistedState("ops.password", "");
   const [groupBy, setGroupBy] = usePersistedState("ops.groupBy", "none");
   const [sortBy, setSortBy] = usePersistedState("ops.sortBy", "overdue");
 
   const csvUrl = ENV_CSV_URL || csvOverride;
   const webhookUrl = ENV_WEBHOOK_URL || webhookOverride;
+  const appPassword = ENV_APP_PASSWORD || passwordOverride;
+
+  const [authed, setAuthed] = useState(() => {
+    if (!appPassword) return true;
+    return localStorage.getItem("ops.auth") === btoa(appPassword);
+  });
+
+  // Re-check auth whenever the configured password changes.
+  useEffect(() => {
+    if (!appPassword) { setAuthed(true); return; }
+    setAuthed(localStorage.getItem("ops.auth") === btoa(appPassword));
+  }, [appPassword]);
+
+  const tryUnlock = (entered) => {
+    if (entered === appPassword) {
+      localStorage.setItem("ops.auth", btoa(appPassword));
+      setAuthed(true);
+      return true;
+    }
+    return false;
+  };
 
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [flushing, setFlushing] = useState(false);
@@ -361,7 +2417,11 @@ export default function App() {
   const [openTask, setOpenTask] = useState(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [checklistOpen, setChecklistOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [activeView, setActiveView] = useState("tasks");
   const [syncing, setSyncing] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const [lastSync, setLastSync] = usePersistedState("ops.lastSync", new Date().toISOString());
   const [syncError, setSyncError] = useState("");
   const [now, setNow] = useState(new Date());
@@ -652,9 +2712,25 @@ export default function App() {
   const pendingCount = pendingQueue.length;
   const isArchivedView = activeStatus === ARCHIVED_STATUS;
 
+  const portfolioStats = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let open = 0, overdue = 0;
+    const buildings = new Set();
+    tasks.forEach((t) => {
+      if (t.status !== "Done" && t.status !== "Archived") {
+        open++;
+        if (t.property) buildings.add(t.property);
+        if (t.dueDate && new Date(t.dueDate + "T00:00:00") < today) overdue++;
+      }
+    });
+    return { open, overdue, buildings: buildings.size };
+  }, [tasks]);
+
+  if (!authed) return <LoginScreen onUnlock={tryUnlock} />;
+
   return (
     <div
-      className="min-h-screen w-full flex items-center justify-center p-0 sm:p-6"
+      className="min-h-screen w-full flex lg:block items-center justify-center p-0 sm:p-6 lg:p-0"
       style={{ background: "radial-gradient(ellipse at top, #E8DFD0 0%, #D4C7B0 50%, #B8A88A 100%)" }}
     >
       <style>{`
@@ -665,10 +2741,13 @@ export default function App() {
         .sheet-anim { animation: slideUp 280ms cubic-bezier(0.32, 0.72, 0, 1); }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .fade-anim { animation: fadeIn 200ms ease-out; }
+        @media (min-width: 1024px) {
+          .app-card { max-height: none !important; }
+        }
       `}</style>
 
       <div
-        className="relative w-full sm:w-96 bg-white sm:rounded-3xl overflow-hidden shadow-2xl"
+        className="app-card relative w-full sm:w-96 lg:w-full bg-white sm:rounded-3xl lg:rounded-none overflow-hidden shadow-2xl lg:shadow-none flex flex-col"
         style={{
           height: "100vh", maxHeight: "844px", minHeight: "640px",
           boxShadow: "0 30px 80px -20px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.06)",
@@ -687,6 +2766,12 @@ export default function App() {
               <button onClick={refresh} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                 {syncing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
               </button>
+              <button onClick={() => setRegisterOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Asset & Certificate Register" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                <Building2 size={15} />
+              </button>
+              <button onClick={() => setChecklistOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Checklists" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                <ClipboardList size={15} />
+              </button>
               <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                 <Settings size={15} />
               </button>
@@ -700,24 +2785,66 @@ export default function App() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks, people, locations..." className="flex-1 bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
             {search && <button onClick={() => setSearch("")}><X size={14} style={{ color: "#8A7A5C" }} /></button>}
           </div>
-          {search.trim() && teamOptions.some((n) => n.toLowerCase() === search.trim().toLowerCase()) && (
-            <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-xl fade-anim" style={{ background: "rgba(15,79,92,0.08)", border: "1px solid rgba(15,79,92,0.15)" }}>
-              <Avatar name={teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase())} size={18} />
-              <span className="text-xs font-medium" style={{ color: "#0F4C5C" }}>
-                Showing all tasks for {teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase())}
-              </span>
-            </div>
-          )}
+          {search.trim() && teamOptions.some((n) => n.toLowerCase() === search.trim().toLowerCase()) && (() => {
+            const matchedName = teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase());
+            return (
+              <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-xl fade-anim" style={{ background: "rgba(15,79,92,0.08)", border: "1px solid rgba(15,79,92,0.15)" }}>
+                <Avatar name={matchedName} size={18} />
+                <span className="text-xs font-medium flex-1" style={{ color: "#0F4C5C" }}>
+                  Showing all tasks for {matchedName}
+                </span>
+                <button
+                  disabled={pdfDownloading}
+                  onClick={async () => {
+                    setPdfDownloading(true);
+                    try { await downloadPersonPDF(matchedName, csvUrl); }
+                    catch (e) { alert("PDF failed: " + e.message); }
+                    finally { setPdfDownloading(false); }
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95"
+                  style={{ background: "#0F4C5C", color: "white", opacity: pdfDownloading ? 0.6 : 1 }}
+                  title="Download outstanding tasks as PDF"
+                >
+                  {pdfDownloading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                  PDF
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
-        <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-          {statusChips.map((p) => (
-            <button key={p.key} onClick={() => setActiveStatus(p.key)} className="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all active:scale-95" style={{ background: activeStatus === p.key ? "#0F0F0F" : "white", color: activeStatus === p.key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
-              {p.label}
-              <span className="px-1.5 rounded-full" style={{ fontSize: "10px", background: activeStatus === p.key ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.05)" }}>{counts[p.key] ?? 0}</span>
+        <div className="flex px-4 py-2 gap-1" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          {[{ id: "tasks", label: "Tasks" }, { id: "analytics", label: "Analytics" }].map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setActiveView(v.id)}
+              className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+              style={{ background: activeView === v.id ? "#0F0F0F" : "transparent", color: activeView === v.id ? "white" : "#8A7A5C" }}
+            >
+              {v.id === "analytics" && <BarChart2 size={11} />}
+              {v.label}
             </button>
           ))}
+          <Link
+            to="/buildings"
+            className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+            style={{ color: "#8A7A5C", textDecoration: "none" }}
+          >
+            <LayoutGrid size={11} />
+            Buildings
+          </Link>
         </div>
+
+        {activeView === "tasks" && (
+          <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+            {statusChips.map((p) => (
+              <button key={p.key} onClick={() => setActiveStatus(p.key)} className="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all active:scale-95" style={{ background: activeStatus === p.key ? "#0F0F0F" : "white", color: activeStatus === p.key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
+                {p.label}
+                <span className="px-1.5 rounded-full" style={{ fontSize: "10px", background: activeStatus === p.key ? "rgba(255,255,255,0.18)" : "rgba(0,0,0,0.05)" }}>{counts[p.key] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         <SyncBanner
           isOnline={isOnline}
@@ -726,56 +2853,80 @@ export default function App() {
           syncError={syncError}
         />
 
-        <div className="overflow-y-auto scrollbar-hide" style={{ height: `calc(100% - ${(syncError || !isOnline || pendingCount > 0) ? 312 : 282}px)`, background: "#FAF6EE" }}>
-          {isArchivedView ? (
-            <div className="px-4 py-2.5">
-              <p className="text-xs" style={{ color: "#8A7A5C" }}>
-                {visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
-              </p>
-            </div>
+        <div className="overflow-y-auto flex-1 scrollbar-hide" style={{ background: "#FAF6EE" }}>
+          {activeView === "analytics" ? (
+            <AnalyticsView tasks={tasks} archivedAtMap={archivedAtMap} />
           ) : (
-            <SortGroupBar
-              groupBy={groupBy} setGroupBy={setGroupBy}
-              sortBy={sortBy} setSortBy={setSortBy}
-              count={visibleTasks.length} lastSync={lastSync}
-            />
-          )}
+            <>
+              {!isArchivedView && (
+                <Link to="/buildings" style={{ textDecoration: "none", display: "block", padding: "10px 16px 4px" }}>
+                  <div style={{ background: "#0F4C5C", borderRadius: 16, padding: "11px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <LayoutGrid size={15} style={{ color: "white" }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: "white", margin: "0 0 2px" }}>Buildings Portfolio</p>
+                      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", margin: 0 }}>
+                        {portfolioStats.open} open · {portfolioStats.overdue > 0 ? <span style={{ color: "#FCA5A5" }}>{portfolioStats.overdue} overdue · </span> : null}{portfolioStats.buildings} properties
+                      </p>
+                    </div>
+                    <ChevronRight size={14} style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }} />
+                  </div>
+                </Link>
+              )}
+              {isArchivedView ? (
+                <div className="px-4 py-2.5">
+                  <p className="text-xs" style={{ color: "#8A7A5C" }}>
+                    {visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"} · synced {timeAgo(lastSync)}
+                  </p>
+                </div>
+              ) : (
+                <SortGroupBar
+                  groupBy={groupBy} setGroupBy={setGroupBy}
+                  sortBy={sortBy} setSortBy={setSortBy}
+                  count={visibleTasks.length} lastSync={lastSync}
+                />
+              )}
 
-          {visibleTasks.length === 0 ? (
-            <div className="px-6 py-16 text-center">
-              <div className="mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
-                <Inbox size={22} style={{ color: "#8A7A5C" }} />
-              </div>
-              <p className="font-display text-lg" style={{ color: "#0F0F0F" }}>All clear</p>
-              <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>No tasks match these filters.</p>
-            </div>
-          ) : isArchivedView ? (
-            <ArchivedListView
-              tasks={visibleTasks}
-              archivedAtMap={archivedAtMap}
-              onTaskClick={setOpenTask}
-              onAssigneeClick={(name) => setSearch(name)}
-            />
-          ) : groupedTasks ? (
-            <GroupedListView
-              groups={groupedTasks}
-              onTaskClick={setOpenTask}
-              onToggle={(t) => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })}
-            />
-          ) : (
-            <div className="px-4 pb-32 pt-1">
-              <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
-                {visibleTasks.map((t) => (
-                  <TaskRow key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
-                ))}
-              </div>
-            </div>
+              {visibleTasks.length === 0 ? (
+                <div className="px-6 py-16 text-center">
+                  <div className="mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                    <Inbox size={22} style={{ color: "#8A7A5C" }} />
+                  </div>
+                  <p className="font-display text-lg" style={{ color: "#0F0F0F" }}>All clear</p>
+                  <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>No tasks match these filters.</p>
+                </div>
+              ) : isArchivedView ? (
+                <ArchivedListView
+                  tasks={visibleTasks}
+                  archivedAtMap={archivedAtMap}
+                  onTaskClick={setOpenTask}
+                  onAssigneeClick={(name) => setSearch(name)}
+                />
+              ) : groupedTasks ? (
+                <GroupedListView
+                  groups={groupedTasks}
+                  onTaskClick={setOpenTask}
+                  onToggle={(t) => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })}
+                />
+              ) : (
+                <div className="px-4 pb-32 pt-1">
+                  <div className="rounded-2xl overflow-hidden" style={{ background: "white", border: "1px solid rgba(0,0,0,0.05)" }}>
+                    {visibleTasks.map((t) => (
+                      <TaskRow key={t.id} task={t} onClick={() => setOpenTask(t)} onToggle={() => updateTask(t.id, { status: t.status === DONE_STATUS ? "Pending" : DONE_STATUS })} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        <button onClick={() => setNewTaskOpen(true)} className="absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "#0F0F0F", color: "white", boxShadow: "0 10px 30px -5px rgba(0,0,0,0.4)" }}>
-          <Plus size={22} strokeWidth={2.5} />
-        </button>
+        {activeView === "tasks" && (
+          <button onClick={() => setNewTaskOpen(true)} className="absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "#0F0F0F", color: "white", boxShadow: "0 10px 30px -5px rgba(0,0,0,0.4)" }}>
+            <Plus size={22} strokeWidth={2.5} />
+          </button>
+        )}
 
         {openTask && (
           <TaskDetailSheet
@@ -799,13 +2950,28 @@ export default function App() {
             onCreate={(data) => { addTask(data); setNewTaskOpen(false); }}
           />
         )}
+        {registerOpen && (
+          <RegisterSheet
+            propertyOptions={propertyOptions.filter((p) => p !== "All properties")}
+            teamOptions={teamOptions}
+            onClose={() => setRegisterOpen(false)}
+          />
+        )}
+        {checklistOpen && (
+          <ChecklistDashboard
+            webhookUrl={webhookUrl}
+            onClose={() => setChecklistOpen(false)}
+          />
+        )}
         {settingsOpen && (
           <SettingsSheet
             envCsvUrl={ENV_CSV_URL}
             envWebhookUrl={ENV_WEBHOOK_URL}
+            envPassword={ENV_APP_PASSWORD}
             csvOverride={csvOverride}
             webhookOverride={webhookOverride}
-            onSave={(c, w) => { setCsvOverride(c); setWebhookOverride(w); setSettingsOpen(false); if (csvUrl) refresh(); }}
+            passwordOverride={passwordOverride}
+            onSave={(c, w, p) => { setCsvOverride(c); setWebhookOverride(w); setPasswordOverride(p); setSettingsOpen(false); if (csvUrl) refresh(); }}
             onClose={() => setSettingsOpen(false)}
           />
         )}
@@ -1128,6 +3294,10 @@ function TaskRow({ task, onClick, onToggle }) {
         {status.label === "In progress" ? "In prog" : status.label}
       </span>
 
+      {task.priority && task.priority !== "medium" && PRIORITIES[task.priority] && (
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: PRIORITIES[task.priority].dot, flexShrink: 0 }} title={PRIORITIES[task.priority].label} />
+      )}
+
       <div className="flex-1 min-w-0">
         <p
           className="text-sm leading-tight truncate"
@@ -1358,6 +3528,24 @@ function TaskDetailSheet({ task, createdAt, archivedAt, team, tasks, onClose, on
           <div className="flex gap-2 mb-3 flex-wrap">
             <span className="px-2 py-1 rounded-md font-semibold uppercase" style={{ fontSize: "10px", background: status.bg, color: status.color, letterSpacing: "0.05em" }}>{status.label}</span>
             {task.category && <span className="px-2 py-1 rounded-md font-semibold uppercase flex items-center gap-1" style={{ fontSize: "10px", background: "white", color: "#374151", border: "1px solid rgba(0,0,0,0.08)", letterSpacing: "0.05em" }}><Tag size={10} />{task.category}</span>}
+            {task.priority && PRIORITIES[task.priority] && <PriorityBadge priority={task.priority} size="sm" />}
+          </div>
+          <div className="mb-3">
+            <p className="text-xs uppercase mb-1.5" style={{ color: "#8A7A5C", letterSpacing: "0.12em", fontSize: "10px" }}>Priority</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {PRIORITY_KEYS.map((pk) => {
+                const p = PRIORITIES[pk];
+                const active = (task.priority || "medium") === pk;
+                return (
+                  <button key={pk} onClick={() => onUpdate({ priority: pk })}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5"
+                    style={{ background: active ? p.bg : "white", color: active ? p.color : "#6B7280", border: `1px solid ${active ? p.dot : "rgba(0,0,0,0.08)"}` }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.dot, display: "inline-block" }} />
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="mb-2 flex flex-col gap-2">
             {editingTitle ? (
@@ -1580,6 +3768,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
   const [dueDate, setDueDate] = useState(() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); });
   const [image, setImage] = useState(null);
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [priority, setPriority] = useState("medium");
   const [recurrence, setRecurrence] = useState("none");
   const [recurDay, setRecurDay] = useState(5); // 5 = Friday
   const [recurMonthDay, setRecurMonthDay] = useState(() => new Date().getDate());
@@ -1618,6 +3807,7 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
       assignee,
       phone: phone.trim(),
       status: "Pending",
+      priority,
       dueDate,
       image: image || undefined,
       recurring: recurrence,
@@ -1659,6 +3849,22 @@ function NewTaskSheet({ propertyOptions, categoryOptions, team, tasks, onClose, 
           </FieldGroup>
           <FieldGroup label="Due date">
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+          </FieldGroup>
+          <FieldGroup label="Priority">
+            <div className="flex gap-1.5 flex-wrap">
+              {PRIORITY_KEYS.map((pk) => {
+                const p = PRIORITIES[pk];
+                const active = priority === pk;
+                return (
+                  <button key={pk} type="button" onClick={() => setPriority(pk)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5"
+                    style={{ background: active ? p.bg : "#F5F0E8", color: active ? p.color : "#8A7A5C", border: `1px solid ${active ? p.dot : "transparent"}` }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: p.dot, display: "inline-block" }} />
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
           </FieldGroup>
           <FieldGroup label="Recurrence">
             <div className="flex gap-2 flex-wrap">
@@ -1743,11 +3949,75 @@ function FieldGroup({ label, children }) {
   );
 }
 
-function SettingsSheet({ envCsvUrl, envWebhookUrl, csvOverride, webhookOverride, onSave, onClose }) {
+function LoginScreen({ onUnlock }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const attempt = () => {
+    if (onUnlock(pw)) {
+      setError(false);
+    } else {
+      setError(true);
+      setPw("");
+      inputRef.current?.focus();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex flex-col items-center justify-center px-8" style={{ background: "#FAF6EE" }}>
+      <div className="w-full max-w-sm flex flex-col items-center">
+        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6" style={{ background: "#0F0F0F" }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
+        <p className="text-xs font-semibold tracking-widest uppercase mb-1" style={{ color: "#8A7A5C" }}>Operations</p>
+        <h1 className="font-display text-2xl font-bold mb-1" style={{ color: "#0F0F0F" }}>Welcome back</h1>
+        <p className="text-sm mb-8 text-center" style={{ color: "#8A7A5C" }}>Enter the password to access the task board</p>
+
+        <div className="w-full rounded-2xl px-4 py-3 mb-3 flex items-center gap-3" style={{ background: "white", border: error ? "1.5px solid #B91C1C" : "1px solid rgba(0,0,0,0.08)" }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={error ? "#B91C1C" : "#8A7A5C"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <input
+            ref={inputRef}
+            type="password"
+            value={pw}
+            onChange={(e) => { setPw(e.target.value); setError(false); }}
+            onKeyDown={(e) => e.key === "Enter" && attempt()}
+            placeholder="Password"
+            className="flex-1 bg-transparent outline-none text-sm font-medium"
+            style={{ color: "#0F0F0F" }}
+          />
+        </div>
+        {error && <p className="text-xs font-semibold mb-3" style={{ color: "#B91C1C" }}>Incorrect password — try again</p>}
+
+        <button
+          onClick={attempt}
+          disabled={!pw}
+          className="w-full py-3 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98]"
+          style={{ background: pw ? "#0F0F0F" : "#E5DFD5", color: pw ? "white" : "#8A7A5C" }}
+        >
+          Unlock
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsSheet({ envCsvUrl, envWebhookUrl, envPassword, csvOverride, webhookOverride, passwordOverride, onSave, onClose }) {
   const [c, setC] = useState(csvOverride);
   const [w, setW] = useState(webhookOverride);
+  const [p, setP] = useState(passwordOverride);
+  const [showPw, setShowPw] = useState(false);
   const csvManaged = !!envCsvUrl;
   const webhookManaged = !!envWebhookUrl;
+  const passwordManaged = !!envPassword;
 
   return (
     <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
@@ -1756,7 +4026,7 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, csvOverride, webhookOverride,
         <div className="px-5 pt-2 pb-3 flex items-center justify-between">
           <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Cancel</button>
           <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>Connections</span>
-          <button onClick={() => onSave(c, w)} className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>Save</button>
+          <button onClick={() => onSave(c, w, p)} className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>Save</button>
         </div>
         <div className="px-5 pb-6 overflow-y-auto scrollbar-hide">
           {csvManaged && webhookManaged ? (
@@ -1771,8 +4041,2040 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, csvOverride, webhookOverride,
           )}
           <UrlField label="Published CSV URL (read)" value={csvManaged ? "Configured via Vercel" : c} onChange={setC} disabled={csvManaged} />
           <UrlField label="n8n webhook URL (write)" value={webhookManaged ? "Configured via Vercel" : w} onChange={setW} disabled={webhookManaged} />
-          {(csvManaged || webhookManaged) && <p className="text-xs mt-3" style={{ color: "#8A7A5C" }}>To change managed URLs, update environment variables in your Vercel project settings.</p>}
+          {(csvManaged || webhookManaged) && <p className="text-xs mt-3 mb-4" style={{ color: "#8A7A5C" }}>To change managed URLs, update environment variables in your Vercel project settings.</p>}
+          <div className="rounded-xl px-4 py-3 mb-3" style={{ background: passwordManaged ? "#F0EBE0" : "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+            <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>App Password</div>
+            {passwordManaged ? (
+              <p className="text-sm" style={{ color: "#8A7A5C" }}>Configured via Vercel</p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type={showPw ? "text" : "password"}
+                  value={p}
+                  onChange={(e) => setP(e.target.value)}
+                  placeholder="Leave blank to disable login"
+                  className="flex-1 bg-transparent outline-none text-sm"
+                  style={{ color: "#0F0F0F" }}
+                />
+                <button type="button" onClick={() => setShowPw((v) => !v)} className="text-xs" style={{ color: "#8A7A5C" }}>
+                  {showPw ? "Hide" : "Show"}
+                </button>
+              </div>
+            )}
+          </div>
+          {!passwordManaged && <p className="text-xs" style={{ color: "#8A7A5C" }}>Set a password to require login. Leave blank for no login screen.</p>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+const GENERATOR_INITIAL = {
+  building: "",
+  incidentRef: "",
+  recipientEmail: "",
+  tenantRows: [{ premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", installationPhoto: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }],
+  centreGenerators: [{ type: "", size: "", serialNumbers: "", amountOfDiesel: "", areaCovered: "" }],
+};
+
+function GeneratorSheet({ webhookUrl, onClose, standalone = false, name = "Generator Information", onSave, initialData = null, submissionId = null }) {
+  const [form, setForm] = useState(initialData || GENERATOR_INITIAL);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  useEffect(() => {
+    if (submissionId) return;
+    if (form.building) {
+      generateIncidentRef(form.building, "generator-info").then((ref) => set("incidentRef", ref));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
+  const addTenantRow = () => setForm((f) => ({ ...f, tenantRows: [...f.tenantRows, { premises: "", tenantName: "", tradingName: "", generatorInstalled: "", pictureOfInstallation: "", installationPhoto: "", dieselOnSite: "", amountOfDiesel: "", cocCertificate: "" }] }));
+  const removeTenantRow = (i) => setForm((f) => ({ ...f, tenantRows: f.tenantRows.filter((_, idx) => idx !== i) }));
+  const updateTenantRow = (i, field, val) => setForm((f) => ({ ...f, tenantRows: f.tenantRows.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const addCentreRow = () => setForm((f) => ({ ...f, centreGenerators: [...f.centreGenerators, { type: "", size: "", serialNumbers: "", amountOfDiesel: "", areaCovered: "" }] }));
+  const removeCentreRow = (i) => setForm((f) => ({ ...f, centreGenerators: f.centreGenerators.filter((_, idx) => idx !== i) }));
+  const updateCentreRow = (i, field, val) => setForm((f) => ({ ...f, centreGenerators: f.centreGenerators.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const downloadPDF = () => {
+    const fileName = `generator-info-${form.incidentRef || form.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateGeneratorPDF(form).save(fileName);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSave) return;
+    setSavingDraft(true);
+    setSubmitError("");
+    try {
+      const existingId = savedId || submissionId || null;
+      const fileName = `generator-info-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!form.building) { setSubmitError("Please select a building."); return; }
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "generator-info");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `generator-info-${finalForm.incidentRef || finalForm.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateGeneratorPDF(finalForm);
+      const pdfBase64 = doc.output("datauristring");
+
+      let resolvedId = submissionId;
+      if (standalone && !submissionId && onSave) {
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}` : null;
+
+      if (webhookUrl) {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            recipientEmail: finalForm.recipientEmail,
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            formData: finalForm,
+            pdfBase64,
+            pdfFileName: fileName,
+            editLink,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(fileName);
+      }
+
+      if (onSave && !(standalone && !submissionId)) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
+      setSubmitted(true);
+    } catch (e) {
+      setSubmitError(e.message || "Submission failed — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => { setForm(GENERATOR_INITIAL); setSubmitted(false); setSubmitError(""); setSavedId(null); };
+
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  const content = (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
+      <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+        {standalone ? (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#0F0F0F" }}>
+              <ClipboardList size={13} style={{ color: "white" }} />
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>Generator Audit</span>
+          </div>
+        ) : (
+          <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>← Back</button>
+        )}
+        <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+        <div className="flex items-center gap-2">
+          {!submitted && (
+            <button onClick={downloadPDF} title="Download PDF"
+              className="flex items-center justify-center w-8 h-8 rounded-xl transition-all active:scale-95"
+              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <Download size={14} />
+            </button>
+          )}
+          {!submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+        {submitted ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+              <CheckCircle2 size={28} style={{ color: "#15803D" }} />
+            </div>
+            <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Report updated" : "Report submitted"}</p>
+            <p className="text-sm mb-5" style={{ color: "#8A7A5C" }}>
+              {submissionId ? "The record has been updated and a new report sent." : `Generator audit submitted${form.recipientEmail ? ` to ${form.recipientEmail}` : ""}.`}
+            </p>
+            {standalone && savedId && (
+              <div className="w-full max-w-sm mx-auto mb-5 p-4 rounded-2xl text-left"
+                style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Use this link to reopen and update this report at any time.</p>
+                <div className="flex gap-2">
+                  <input readOnly value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                    className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                    style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }} />
+                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1 transition-all"
+                    style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                    {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
+            <button onClick={downloadPDF}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+              style={{ background: "#0F4C5C", color: "white" }}>
+              <Download size={14} /> Download PDF copy
+            </button>
+            {standalone && !submissionId && (
+              <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Submit another report</button>
+            )}
+            {!standalone && (
+              <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+            )}
+          </div>
+        ) : (
+          <>
+            {submitError && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>{submitError}</div>
+            )}
+            {!webhookUrl && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#FEF3C7", border: "1px solid rgba(180,83,9,0.2)", color: "#92400E" }}>
+                No webhook configured — submitting will download the PDF locally instead.
+              </div>
+            )}
+
+            <SectionHeader title="Building Details" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Location</div>
+              <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                <option value="">Select building…</option>
+                {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Reference No.</div>
+                {form.building && BUILDING_CODES[form.building] && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                )}
+              </div>
+              <input value={form.incidentRef} onChange={(e) => set("incidentRef", e.target.value)}
+                placeholder="Select a building to generate"
+                className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+            </div>
+
+            <SectionHeader number="1" title="Tenant Generator Information" />
+            {form.tenantRows.map((row, i) => (
+              <div key={i} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8A7A5C" }}>Tenant {i + 1}</p>
+                  {form.tenantRows.length > 1 && (
+                    <button onClick={() => removeTenantRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                  )}
+                </div>
+                <InputRow label="Premises / Unit" value={row.premises} onChange={(v) => updateTenantRow(i, "premises", v)} />
+                <InputRow label="Tenant Name" value={row.tenantName} onChange={(v) => updateTenantRow(i, "tenantName", v)} />
+                <InputRow label="Trading Name" value={row.tradingName} onChange={(v) => updateTenantRow(i, "tradingName", v)} />
+                <YesNoRow label="Generator Installed?" value={row.generatorInstalled} onChange={(v) => updateTenantRow(i, "generatorInstalled", v)} includeNA />
+                <YesNoRow label="Picture of Installation?" value={row.pictureOfInstallation} onChange={(v) => updateTenantRow(i, "pictureOfInstallation", v)} />
+                {row.pictureOfInstallation === "Yes" && (
+                  <PhotoUploadRow value={row.installationPhoto} onChange={(v) => updateTenantRow(i, "installationPhoto", v)} />
+                )}
+                <YesNoRow label="Is Diesel Stored on Site?" value={row.dieselOnSite} onChange={(v) => updateTenantRow(i, "dieselOnSite", v)} />
+                {row.dieselOnSite === "Yes" && (
+                  <InputRow label="Amount of Diesel Stored" value={row.amountOfDiesel} onChange={(v) => updateTenantRow(i, "amountOfDiesel", v)} placeholder="e.g. 200 L" />
+                )}
+                <YesNoRow label="COC Certificate?" value={row.cocCertificate} onChange={(v) => updateTenantRow(i, "cocCertificate", v)} includeNA />
+              </div>
+            ))}
+            <button onClick={addTenantRow}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold mb-4 transition-all active:scale-[0.98]"
+              style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
+              <Plus size={14} /> Add Tenant
+            </button>
+
+            <SectionHeader number="2" title="Generator for Centre" />
+            {form.centreGenerators.map((row, i) => (
+              <div key={i} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8A7A5C" }}>Generator {i + 1}</p>
+                  {form.centreGenerators.length > 1 && (
+                    <button onClick={() => removeCentreRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                  )}
+                </div>
+                <InputRow label="Type" value={row.type} onChange={(v) => updateCentreRow(i, "type", v)} placeholder="e.g. Diesel" />
+                <InputRow label="Size / kVA" value={row.size} onChange={(v) => updateCentreRow(i, "size", v)} placeholder="e.g. 100 kVA" />
+                <InputRow label="Serial Numbers" value={row.serialNumbers} onChange={(v) => updateCentreRow(i, "serialNumbers", v)} />
+                <InputRow label="Amount of Diesel Stored" value={row.amountOfDiesel} onChange={(v) => updateCentreRow(i, "amountOfDiesel", v)} placeholder="e.g. 500 L" />
+                <TextareaRow label="Area and Items Generator Covers" value={row.areaCovered} onChange={(v) => updateCentreRow(i, "areaCovered", v)} rows={2} placeholder="e.g. Common areas, fire systems, lifts…" />
+              </div>
+            ))}
+            <button onClick={addCentreRow}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold mb-4 transition-all active:scale-[0.98]"
+              style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
+              <Plus size={14} /> Add Generator
+            </button>
+
+            <SectionHeader title="Send Report" />
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+            <div className="flex gap-2 mt-2">
+              <button onClick={downloadPDF}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
+                <Download size={14} /> Download PDF
+              </button>
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {submitting ? (submissionId ? "Updating…" : "Sending…") : webhookUrl ? "Send via Email" : "Download PDF"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  if (standalone) return content;
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      {content}
+    </div>
+  );
+}
+
+const BCA_INITIAL = {
+  building: "",
+  incidentRef: "",
+  date: "",
+  inspector: "",
+  recipientEmail: "",
+  rows: Object.fromEntries(BCA_SECTIONS.map((s) => [s.key, s.items.map(() => ({ inspected: false, condition: "", priority: "", notes: "", photos: [] }))])),
+};
+
+function BCAItemRow({ item, row, onChange }) {
+  const COND = [
+    { v: "G", active: "#15803D" },
+    { v: "F", active: "#A16207" },
+    { v: "P", active: "#C2410C" },
+    { v: "C", active: "#B91C1C" },
+  ];
+
+  const addPhoto = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 1200;
+          let w = img.width, h = img.height;
+          if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          onChange("photos", [...(row.photos || []), canvas.toDataURL("image/jpeg", 0.72)]);
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  };
+
+  const removePhoto = (idx) => onChange("photos", (row.photos || []).filter((_, i) => i !== idx));
+
+  return (
+    <div className="rounded-xl p-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="flex items-start gap-2 mb-2">
+        <button type="button" onClick={() => onChange("inspected", !row.inspected)}
+          className="flex-shrink-0 mt-0.5 w-4 h-4 rounded flex items-center justify-center transition-all"
+          style={{ background: row.inspected ? "#0F4C5C" : "transparent", border: row.inspected ? "none" : "1.5px solid #D1C9B8" }}>
+          {row.inspected && <Check size={10} style={{ color: "white" }} />}
+        </button>
+        <span className="text-sm" style={{ color: "#0F0F0F" }}>{item}</span>
+      </div>
+      <div className="flex items-start gap-3 mb-2">
+        <div className="flex-1">
+          <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Condition</div>
+          <div className="flex gap-1">
+            {COND.map(({ v, active }) => (
+              <button key={v} type="button" onClick={() => onChange("condition", row.condition === v ? "" : v)}
+                className="flex-1 py-1 rounded text-xs font-bold transition-all active:scale-95"
+                style={{ background: row.condition === v ? active : "#F0EBE0", color: row.condition === v ? "white" : "#3F3A2E" }}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1">
+          <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Priority</div>
+          <div className="flex gap-1">
+            {["1", "2", "3", "4"].map((p) => (
+              <button key={p} type="button" onClick={() => onChange("priority", row.priority === p ? "" : p)}
+                className="flex-1 py-1 rounded text-xs font-bold transition-all active:scale-95"
+                style={{ background: row.priority === p ? "#0F0F0F" : "#F0EBE0", color: row.priority === p ? "white" : "#3F3A2E" }}>
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <input type="text" value={row.notes || ""} onChange={(e) => onChange("notes", e.target.value)}
+        placeholder="Notes (optional)"
+        className="w-full bg-transparent outline-none text-xs py-1.5 px-1"
+        style={{ color: "#0F0F0F", borderTop: "1px solid rgba(0,0,0,0.06)" }} />
+      <div className="pt-2 mt-1" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+        {(row.photos || []).length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-2">
+            {(row.photos || []).map((src, idx) => (
+              <div key={idx} className="relative flex-shrink-0">
+                <img src={src} alt={`photo ${idx + 1}`} className="rounded-lg"
+                  style={{ width: 72, height: 54, objectFit: "cover" }} />
+                <button type="button" onClick={() => removePhoto(idx)}
+                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+                  style={{ background: "#B91C1C", color: "white", fontSize: 9, lineHeight: 1 }}>
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <label className="flex items-center gap-1 cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95"
+            style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+            <Camera size={11} /> Camera
+            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={addPhoto} />
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95"
+            style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Gallery
+            <input type="file" accept="image/*" multiple className="hidden" onChange={addPhoto} />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Merge saved rows with the current BCA_SECTIONS so that items added after a save
+// get blank defaults instead of being undefined (which silently breaks setRow).
+function normalizeBCARows(savedRows) {
+  const blank = () => ({ inspected: false, condition: "", priority: "", notes: "", photos: [] });
+  console.log("[BCA load] savedRows keys:", Object.keys(savedRows || {}));
+  BCA_SECTIONS.forEach((s) => {
+    const arr = savedRows?.[s.key];
+    console.log(`[BCA load] ${s.key}: saved length=${Array.isArray(arr) ? arr.length : "missing"}, expected=${s.items.length}`);
+  });
+  return Object.fromEntries(
+    BCA_SECTIONS.map((s) => {
+      const saved = Array.isArray(savedRows?.[s.key]) ? savedRows[s.key] : [];
+      return [s.key, s.items.map((_, i) => (saved[i] != null ? saved[i] : blank()))];
+    })
+  );
+}
+
+function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Condition Assessment", onSave, initialData = null, submissionId = null }) {
+  const initForm = initialData
+    ? { ...initialData, rows: normalizeBCARows(initialData.rows) }
+    : BCA_INITIAL;
+  const [form, setForm] = useState(initForm);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  useEffect(() => {
+    if (submissionId) return;
+    if (form.building) {
+      generateIncidentRef(form.building, "bca-site").then((ref) => set("incidentRef", ref));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
+  const setRow = (sectionKey, idx, field, value) => {
+    setForm((f) => {
+      const section = f.rows[sectionKey];
+      if (!section) return f;
+      return {
+        ...f,
+        rows: {
+          ...f.rows,
+          [sectionKey]: section.map((r, i) => i === idx ? { ...r, [field]: value } : r),
+        },
+      };
+    });
+  };
+
+  const downloadPDF = () => {
+    const fileName = `bca-${form.incidentRef || form.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateBCAPDF(form).save(fileName);
+  };
+
+  // Save current progress to Supabase without firing the webhook or sending email
+  const handleSaveDraft = async () => {
+    if (!onSave) return;
+    setSavingDraft(true);
+    setSubmitError("");
+    try {
+      const existingId = savedId || submissionId || null;
+      const fileName = `bca-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!form.building) { setSubmitError("Please select a building."); return; }
+    if (!form.inspector.trim()) { setSubmitError("Please enter the inspector's name."); return; }
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "bca-site");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `bca-${finalForm.incidentRef || finalForm.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateBCAPDF(finalForm);
+
+      let resolvedId = submissionId;
+
+      // For edits: always write to DB first — the webhook email is secondary and
+      // should never block the save.
+      if (onSave && submissionId) {
+        await onSave(finalForm, fileName, submissionId);
+      } else if (standalone && !submissionId && onSave) {
+        // New standalone submission: create the record first so we have an edit link
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId
+        ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}`
+        : null;
+
+      if (webhookUrl) {
+        const pdfBase64 = doc.output("datauristring");
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            recipientEmail: finalForm.recipientEmail,
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            inspector: finalForm.inspector,
+            date: finalForm.date,
+            formData: finalForm,
+            pdfBase64,
+            pdfFileName: fileName,
+            editLink,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(fileName);
+      }
+
+      // For new non-standalone submissions: save to DB after webhook succeeds
+      if (onSave && !submissionId && !standalone) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
+      setSubmitted(true);
+    } catch (e) {
+      setSubmitError(e.message || "Submission failed — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => { setForm(BCA_INITIAL); setSubmitted(false); setSubmitError(""); setSavedId(null); };
+
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  const content = (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
+      <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+        {standalone ? (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#0F0F0F" }}>
+              <ClipboardList size={13} style={{ color: "white" }} />
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>BCA Inspection</span>
+          </div>
+        ) : (
+          <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>← Back</button>
+        )}
+        <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+        <div className="flex items-center gap-2">
+          {!submitted && (
+            <button onClick={downloadPDF} title="Download PDF"
+              className="flex items-center justify-center w-8 h-8 rounded-xl transition-all active:scale-95"
+              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <Download size={14} />
+            </button>
+          )}
+          {!submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+        {submitted ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+              <CheckCircle2 size={28} style={{ color: "#15803D" }} />
+            </div>
+            <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Assessment updated" : "Assessment submitted"}</p>
+            <p className="text-sm mb-5" style={{ color: "#8A7A5C" }}>
+              {submissionId ? "The record has been updated." : `Assessment submitted${form.recipientEmail ? ` to ${form.recipientEmail}` : ""}.`}
+            </p>
+            {standalone && savedId && (
+              <div className="w-full max-w-sm mx-auto mb-5 p-4 rounded-2xl text-left"
+                style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Use this link to reopen and update this assessment at any time.</p>
+                <div className="flex gap-2">
+                  <input readOnly value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                    className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                    style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }} />
+                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1 transition-all"
+                    style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                    {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
+            <button onClick={downloadPDF}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+              style={{ background: "#0F4C5C", color: "white" }}>
+              <Download size={14} /> Download PDF copy
+            </button>
+            {standalone && !submissionId && (
+              <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Submit another assessment</button>
+            )}
+            {!standalone && (
+              <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+            )}
+          </div>
+        ) : (
+          <>
+            {submitError && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>{submitError}</div>
+            )}
+            {!webhookUrl && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#FEF3C7", border: "1px solid rgba(180,83,9,0.2)", color: "#92400E" }}>
+                No webhook configured — submitting will download the PDF locally instead.
+              </div>
+            )}
+
+            <SectionHeader title="Inspection Details" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Property</div>
+              <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                <option value="">Select building…</option>
+                {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <InputRow label="Date of Inspection" value={form.date} onChange={(v) => set("date", v)} type="date" />
+            <InputRow label="Inspector Name" value={form.inspector} onChange={(v) => set("inspector", v)} placeholder="Full name" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Reference No.</div>
+                {form.building && BUILDING_CODES[form.building] && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                )}
+              </div>
+              <input value={form.incidentRef} onChange={(e) => set("incidentRef", e.target.value)}
+                placeholder="Select a building to generate"
+                className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+            </div>
+
+            <div className="mt-3 mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <span className="font-semibold">Legend — </span>
+              Condition: <span className="font-bold" style={{ color: "#15803D" }}>G</span>=Good  <span className="font-bold" style={{ color: "#A16207" }}>F</span>=Fair  <span className="font-bold" style={{ color: "#C2410C" }}>P</span>=Poor  <span className="font-bold" style={{ color: "#B91C1C" }}>C</span>=Critical  ·  Priority: <span className="font-bold">1</span>=Immediate  <span className="font-bold">2</span>=Short-term  <span className="font-bold">3</span>=Medium-term  <span className="font-bold">4</span>=Long-term
+            </div>
+
+            {BCA_SECTIONS.map((section) => (
+              <div key={section.key}>
+                <SectionHeader title={section.title} />
+                {section.items.map((item, i) => (
+                  <BCAItemRow
+                    key={i}
+                    item={item}
+                    row={form.rows[section.key][i]}
+                    onChange={(field, value) => setRow(section.key, i, field, value)}
+                  />
+                ))}
+              </div>
+            ))}
+
+            <SectionHeader title="Send Report" />
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+            <div className="flex gap-2 mt-2">
+              <button onClick={downloadPDF}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
+                <Download size={14} /> Download PDF
+              </button>
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {submitting ? (submissionId ? "Updating…" : "Sending…") : webhookUrl ? "Send via Email" : "Download PDF"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  if (standalone) return content;
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      {content}
+    </div>
+  );
+}
+
+function ChecklistDashboard({ webhookUrl, onClose }) {
+  const [activeId, setActiveId] = useState(null);
+  const [editingSubmission, setEditingSubmission] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [tab, setTab] = useState("checklists");
+  const [submissions, setSubmissions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+
+  const fetchSubmissions = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const { data, error } = await supabase
+        .from("checklist_submissions")
+        .select("*")
+        .order("submitted_at", { ascending: false });
+      if (error) throw error;
+      setSubmissions(data || []);
+    } catch {
+      setLoadError("Could not load submissions. Check your connection.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchSubmissions(); }, [fetchSubmissions]);
+
+  const copyLink = (id) => {
+    const url = `${window.location.origin}${window.location.pathname}?checklist=${id}`;
+    navigator.clipboard.writeText(url)
+      .then(() => { setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); })
+      .catch(() => {});
+  };
+
+  const saveSubmission = async (entry, formData, pdfFileName, existingId = null) => {
+    // Resolve building_id so the portfolio health score can query by FK
+    let building_id = null;
+    if (formData.building) {
+      const { data: bRow } = await supabase
+        .from("buildings").select("id").eq("name", formData.building).single();
+      building_id = bRow?.id || null;
+    }
+
+    // Compute BCA condition score at submit time for fast health score reads
+    let score = null, result = "info";
+    if (entry.id === "bca-site") {
+      score = computeBCAScoreForSubmission(formData);
+      if (score != null) {
+        result = score >= 75 ? "pass" : score >= 50 ? "conditional" : "fail";
+      }
+    }
+
+    const record = {
+      checklist_id:   entry.id,
+      incident_ref:   formData.incidentRef,
+      building:       formData.building,
+      building_id,
+      lift_id:        formData.liftId,
+      date_of_failure: formData.dateOfFailure,
+      submitted_at:   new Date().toISOString(),
+      pdf_file_name:  pdfFileName,
+      form_data:      formData,
+      score,
+      result,
+    };
+    try {
+      if (existingId) {
+        await supabase.from("checklist_submissions").update(record).eq("id", existingId);
+      } else {
+        await supabase.from("checklist_submissions").insert(record);
+      }
+      await fetchSubmissions();
+    } catch {
+      // submission already saved via webhook; non-critical
+    }
+    setActiveId(null);
+    setEditingSubmission(null);
+  };
+
+  const archiveSubmission = async (id, archive) => {
+    setSubmissions((prev) => prev.map((s) => s.id === id ? { ...s, archived: archive } : s));
+    await supabase.from("checklist_submissions").update({ archived: archive }).eq("id", id);
+  };
+
+  const redownload = (sub) => {
+    const entry = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id);
+    const fileName = sub.pdf_file_name || `${sub.checklist_id || "report"}-${sub.incident_ref || "report"}.pdf`;
+    (entry?.generatePDF || generateChecklistPDF)(sub.form_data).save(fileName);
+  };
+
+  const fmtSubmittedAt = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  };
+
+  if (activeId || editingSubmission) {
+    const entry = editingSubmission
+      ? CHECKLIST_REGISTRY.find((c) => c.id === editingSubmission.checklist_id)
+      : CHECKLIST_REGISTRY.find((c) => c.id === activeId);
+    if (!entry) return null;
+    return (
+      <div className="absolute inset-0 z-30">
+        <entry.FormComponent
+          webhookUrl={webhookUrl}
+          onClose={() => { setActiveId(null); setEditingSubmission(null); }}
+          name={entry.name}
+          initialData={editingSubmission?.form_data || null}
+          submissionId={editingSubmission?.id || null}
+          onSave={(formData, pdfFileName, subId) => saveSubmission(entry, formData, pdfFileName, subId)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      <div className="absolute inset-0 flex flex-col sheet-anim" style={{ background: "#FAF6EE" }}>
+        {/* Header */}
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+          <div className="flex items-center gap-2">
+            <ClipboardList size={15} style={{ color: "#0F0F0F" }} />
+            <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>Checklists</span>
+          </div>
+          <div className="w-10" />
+        </div>
+
+        {/* Tabs */}
+        <div className="flex px-4 pt-3 pb-1 gap-2">
+          {[["checklists", "Checklists"], ["submissions", `Submissions${submissions.filter(s => !s.archived).length ? ` (${submissions.filter(s => !s.archived).length})` : ""}`]].map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95"
+              style={{ background: tab === key ? "#0F0F0F" : "white", color: tab === key ? "white" : "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "checklists" ? (
+          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+            <p className="text-xs mb-4" style={{ color: "#8A7A5C" }}>
+              Fill in a checklist internally, or share a link with an external party so they can complete it without accessing the task board.
+            </p>
+            {CHECKLIST_REGISTRY.map((entry) => {
+              const typeColor = {
+                "lift-rca":       { bg: "#FEF3C7", color: "#92400E" },
+                "generator-info": { bg: "#DBEAFE", color: "#1E40AF" },
+                "bca-site":       { bg: "#D1FAE5", color: "#065F46" },
+                "tenant-fire":    { bg: "#FEE2E2", color: "#991B1B" },
+              }[entry.id] || { bg: "#F0EBE0", color: "#8A7A5C" };
+              return (
+              <div key={entry.id} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-start justify-between gap-3 mb-1">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate" style={{ color: "#0F0F0F" }}>{entry.name}</p>
+                    <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "#8A7A5C" }}>{entry.description}</p>
+                  </div>
+                  <span className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold"
+                    style={{ background: typeColor.bg, color: typeColor.color }}>
+                    {entry.category}
+                  </span>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => setActiveId(entry.id)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                    style={{ background: "#0F0F0F", color: "white" }}>
+                    <ClipboardList size={13} /> Fill In
+                  </button>
+                  <button onClick={() => copyLink(entry.id)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                    style={{
+                      background: copiedId === entry.id ? "rgba(21,128,61,0.08)" : "#F0EBE0",
+                      color: copiedId === entry.id ? "#15803D" : "#3F3A2E",
+                      border: copiedId === entry.id ? "1px solid rgba(21,128,61,0.2)" : "1px solid transparent",
+                    }}>
+                    {copiedId === entry.id ? <Check size={13} /> : <Download size={13} />}
+                    {copiedId === entry.id ? "Link copied!" : "Share link"}
+                  </button>
+                </div>
+              </div>
+            );})}
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+            {loading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 size={20} className="animate-spin" style={{ color: "#8A7A5C" }} />
+              </div>
+            ) : loadError ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <p className="text-sm mb-3" style={{ color: "#B91C1C" }}>{loadError}</p>
+                <button onClick={fetchSubmissions} className="text-xs font-semibold" style={{ color: "#8A7A5C" }}>Try again</button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs" style={{ color: "#8A7A5C" }}>
+                    {showArchived ? "Archived submissions" : `${submissions.filter(s => !s.archived).length} active`}
+                  </p>
+                  <button onClick={() => setShowArchived(!showArchived)}
+                    className="text-xs font-semibold flex items-center gap-1"
+                    style={{ color: showArchived ? "#0F4C5C" : "#8A7A5C" }}>
+                    <Archive size={11} />
+                    {showArchived ? "View active" : "View archived"}
+                  </button>
+                </div>
+                {submissions.filter(s => showArchived ? s.archived : !s.archived).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                      {showArchived ? <Archive size={20} style={{ color: "#8A7A5C" }} /> : <ClipboardList size={20} style={{ color: "#8A7A5C" }} />}
+                    </div>
+                    <p className="font-display text-base mb-1" style={{ color: "#0F0F0F" }}>
+                      {showArchived ? "No archived submissions" : "No submissions yet"}
+                    </p>
+                    <p className="text-xs" style={{ color: "#8A7A5C" }}>
+                      {showArchived ? "Archived reports will appear here." : "Submitted forms will appear here."}
+                    </p>
+                  </div>
+                ) : (
+                  submissions.filter(s => showArchived ? s.archived : !s.archived).map((sub) => {
+                    const entry = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id);
+                    const entryName = entry?.name || sub.checklist_id;
+                    const typeColor = {
+                      "lift-rca":       { bg: "#FEF3C7", color: "#92400E" },
+                      "generator-info": { bg: "#DBEAFE", color: "#1E40AF" },
+                      "bca-site":       { bg: "#D1FAE5", color: "#065F46" },
+                      "tenant-fire":    { bg: "#FEE2E2", color: "#991B1B" },
+                    }[sub.checklist_id] || { bg: "#F0EBE0", color: "#8A7A5C" };
+                    return (
+                      <div key={sub.id} className="rounded-2xl p-4 mb-3" style={{ background: showArchived ? "#F7F4EE" : "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm" style={{ color: showArchived ? "#8A7A5C" : "#0F0F0F" }}>
+                              {sub.building || "—"}{sub.lift_id ? ` · ${sub.lift_id}` : ""}
+                            </p>
+                            {sub.incident_ref && (
+                              <p className="text-xs mt-0.5" style={{ color: "#8A7A5C" }}>Ref: {sub.incident_ref}</p>
+                            )}
+                          </div>
+                          <span className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold leading-tight text-right"
+                            style={{ background: typeColor.bg, color: typeColor.color }}>
+                            {entryName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: "#8A7A5C" }}>
+                          {sub.date_of_failure && <span>Failure: {sub.date_of_failure}</span>}
+                          <span>Submitted: {fmtSubmittedAt(sub.submitted_at)}</span>
+                        </div>
+                        {sub.form_data?.recipientEmail && (
+                          <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.form_data.recipientEmail}</p>
+                        )}
+                        {showArchived ? (
+                          <div className="flex gap-2">
+                            <button onClick={() => redownload(sub)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+                              <Download size={13} /> Download PDF
+                            </button>
+                            <button onClick={() => archiveSubmission(sub.id, false)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)" }}>
+                              Unarchive
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <button onClick={() => redownload(sub)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+                              <Download size={13} /> Download PDF
+                            </button>
+                            <button onClick={() => setEditingSubmission(sub)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                              style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)" }}>
+                              Edit
+                            </button>
+                            <button onClick={() => archiveSubmission(sub.id, true)}
+                              className="flex items-center justify-center px-3 py-2 rounded-xl transition-all active:scale-[0.98]"
+                              style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)" }}
+                              title="Archive">
+                              <Archive size={14} style={{ color: "#8A7A5C" }} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Checklist form helpers (module-level so they never remount on re-render) ----------
+function SectionHeader({ number, title }) {
+  return (
+    <div className="mt-5 mb-2 px-3 py-2 rounded-xl text-sm font-semibold" style={{ background: "#0F0F0F", color: "white" }}>
+      {number ? `${number}. ` : ""}{title}
+    </div>
+  );
+}
+
+function CheckRow({ label, checked, onChange }) {
+  return (
+    <button type="button" onClick={() => onChange(!checked)}
+      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
+      style={{ background: checked ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${checked ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
+      <div className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center"
+        style={{ background: checked ? "#0F4C5C" : "transparent", border: checked ? "none" : "1.5px solid #D1C9B8" }}>
+        {checked && <Check size={10} style={{ color: "white" }} />}
+      </div>
+      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
+    </button>
+  );
+}
+
+function RadioRow({ label, selected, onSelect }) {
+  return (
+    <button type="button" onClick={onSelect}
+      className="flex items-center gap-3 w-full text-left px-4 py-2.5 rounded-xl mb-1.5 transition-all active:scale-[0.98]"
+      style={{ background: selected ? "rgba(15,76,92,0.07)" : "white", border: `1px solid ${selected ? "rgba(15,76,92,0.25)" : "rgba(0,0,0,0.06)"}` }}>
+      <div className="w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center"
+        style={{ border: selected ? "none" : "1.5px solid #D1C9B8", background: selected ? "#0F4C5C" : "transparent" }}>
+        {selected && <div className="w-2 h-2 rounded-full bg-white" />}
+      </div>
+      <span className="text-sm" style={{ color: "#0F0F0F" }}>{label}</span>
+    </button>
+  );
+}
+
+function InputRow({ label, value, onChange, type = "text", placeholder = "" }) {
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+    </div>
+  );
+}
+
+function TextareaRow({ label, value, onChange, placeholder = "", rows = 3 }) {
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+        className="w-full bg-transparent outline-none text-sm resize-none" style={{ color: "#0F0F0F" }} />
+    </div>
+  );
+}
+
+function YesNoRow({ label, value, onChange, includeNA = false }) {
+  const opts = includeNA ? ["Yes", "No", "N/A"] : ["Yes", "No"];
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>{label}</div>
+      <div className="flex gap-2">
+        {opts.map((opt) => (
+          <button key={opt} type="button" onClick={() => onChange(value === opt ? "" : opt)}
+            className="flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all active:scale-[0.98]"
+            style={{ background: value === opt ? "#0F4C5C" : "#F0EBE0", color: value === opt ? "white" : "#3F3A2E" }}>
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PhotoUploadRow({ value, onChange }) {
+  const compressImage = (file) => new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1200;
+        let w = img.width, h = img.height;
+        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const compressed = await compressImage(file);
+    onChange(compressed);
+    e.target.value = "";
+  };
+
+  return (
+    <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="uppercase mb-2" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Installation Photo</div>
+      {value ? (
+        <div className="relative">
+          <img src={value} alt="Installation" className="w-full rounded-xl object-cover" style={{ maxHeight: 220 }} />
+          <button onClick={() => onChange("")} type="button"
+            className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.55)" }}>
+            <X size={13} style={{ color: "white" }} />
+          </button>
+        </div>
+      ) : (
+        <label className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl cursor-pointer transition-all active:scale-[0.99]"
+          style={{ background: "#F0EBE0", border: "1px dashed rgba(0,0,0,0.15)" }}>
+          <Camera size={20} style={{ color: "#8A7A5C" }} />
+          <span className="text-xs font-semibold" style={{ color: "#8A7A5C" }}>Tap to add photo</span>
+          <input type="file" accept="image/*" capture="environment" onChange={handleFile} className="hidden" />
+        </label>
+      )}
+    </div>
+  );
+}
+
+const CHECKLIST_INITIAL = {
+  building: "", liftId: "", dateOfFailure: "", timeOfFailure: "",
+  timeReported: "", timeTechArrived: "", timeLiftRestored: "",
+  serviceProvider: "", technicianName: "", incidentRef: "",
+  rcaCompleted: false, actualCause: "", failureCategory: "",
+  failureCategoryOther: "", failureDescription: "",
+  correctiveActionsCompleted: false,
+  correctiveActions: [{ action: "", dateCompleted: "", technician: "" }],
+  components: [{ component: "", actionTaken: "", partNumber: "", dateCompleted: "" }],
+  componentsRecorded: false, testingCompleted: false, safetyChecksCompleted: false,
+  tempMeasuresImplemented: false, tempMeasuresDetails: "",
+  tempMeasuresFrom: "", tempMeasuresTo: "",
+  tempMeasureRemoved: false, tempMeasureStillActive: false,
+  outstandingActions: [{ action: "", responsiblePerson: "", dueDate: "", status: "" }],
+  noOutstandingActions: false, outstandingCommunicated: false,
+  noResidualRisks: false, operationalRisk: false, reliabilityRisk: false,
+  safetyRisk: false, complianceRisk: false, riskDetails: "", mitigationMeasures: "",
+  operationalStatus: "", finalTestingCompleted: null, monitoringPeriod: "",
+  serviceProviderName: "", serviceProviderDate: "", fmName: "", fmDate: "",
+  landlordNotified: null, incidentClosedDate: "",
+  recipientEmail: "",
+};
+
+function LiftRCASheet({ webhookUrl, onClose, standalone = false, name = "Lift RCA Checklist", onSave, initialData = null, submissionId = null }) {
+  const [form, setForm] = useState(initialData || CHECKLIST_INITIAL);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  // Auto-generate incident reference when building is chosen (skip when editing an existing submission)
+  useEffect(() => {
+    if (submissionId) return;
+    if (form.building) {
+      generateIncidentRef(form.building, "lift-rca").then((ref) => set("incidentRef", ref));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
+  const addCorrRow = () => setForm((f) => ({ ...f, correctiveActions: [...f.correctiveActions, { action: "", dateCompleted: "", technician: "" }] }));
+  const removeCorrRow = (i) => setForm((f) => ({ ...f, correctiveActions: f.correctiveActions.filter((_, idx) => idx !== i) }));
+  const updateCorrRow = (i, field, val) => setForm((f) => ({ ...f, correctiveActions: f.correctiveActions.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const addCompRow = () => setForm((f) => ({ ...f, components: [...f.components, { component: "", actionTaken: "", partNumber: "", dateCompleted: "" }] }));
+  const removeCompRow = (i) => setForm((f) => ({ ...f, components: f.components.filter((_, idx) => idx !== i) }));
+  const updateCompRow = (i, field, val) => setForm((f) => ({ ...f, components: f.components.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const addOutRow = () => setForm((f) => ({ ...f, outstandingActions: [...f.outstandingActions, { action: "", responsiblePerson: "", dueDate: "", status: "" }] }));
+  const removeOutRow = (i) => setForm((f) => ({ ...f, outstandingActions: f.outstandingActions.filter((_, idx) => idx !== i) }));
+  const updateOutRow = (i, field, val) => setForm((f) => ({ ...f, outstandingActions: f.outstandingActions.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
+
+  const downloadPDF = () => {
+    const fileName = `lift-rca-${form.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateChecklistPDF(form).save(fileName);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSave) return;
+    setSavingDraft(true);
+    setSubmitError("");
+    try {
+      const existingId = savedId || submissionId || null;
+      const fileName = `lift-rca-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "lift-rca");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `lift-rca-${finalForm.incidentRef || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateChecklistPDF(finalForm);
+      const pdfBase64 = doc.output("datauristring");
+
+      // Standalone new: save to Supabase first so the edit link can be included in the email
+      let resolvedId = submissionId;
+      if (standalone && !submissionId && onSave) {
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId
+        ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}`
+        : null;
+
+      if (webhookUrl) {
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            recipientEmail: finalForm.recipientEmail,
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            liftId: finalForm.liftId,
+            dateOfFailure: finalForm.dateOfFailure,
+            formData: finalForm,
+            pdfBase64,
+            pdfFileName: fileName,
+            editLink,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(fileName);
+      }
+
+      // Internal or standalone edit: save after webhook
+      if (onSave && !(standalone && !submissionId)) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
+      setSubmitted(true);
+    } catch (e) {
+      setSubmitError(e.message || "Submission failed — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => { setForm(CHECKLIST_INITIAL); setSubmitted(false); setSubmitError(""); setSavedId(null); };
+
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  const content = (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
+        {/* Header */}
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+          {standalone ? (
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#0F0F0F" }}>
+                <ClipboardList size={13} style={{ color: "white" }} />
+              </div>
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>Incident Report</span>
+            </div>
+          ) : (
+            <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>
+              ← Back
+            </button>
+          )}
+          <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+          {!submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
+            </button>
+          )}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+          {submitted ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+                <CheckCircle2 size={28} style={{ color: "#15803D" }} />
+              </div>
+              <p className="font-display text-xl mb-2" style={{ color: "#0F0F0F" }}>{submissionId ? "Report updated" : "Report submitted"}</p>
+              <p className="text-sm mb-5" style={{ color: "#8A7A5C" }}>
+                {submissionId
+                  ? "The record has been updated and a new report sent."
+                  : `The completed RCA report has been sent${form.recipientEmail ? ` to ${form.recipientEmail}` : ""} via your webhook.`}
+              </p>
+              {standalone && savedId && (
+                <div className="w-full max-w-sm mx-auto mb-5 p-4 rounded-2xl text-left"
+                  style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                  <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                  <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>
+                    Use this link to reopen and update this report at any time.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      readOnly
+                      value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                      className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                      style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }}
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`);
+                        setLinkCopied(true);
+                        setTimeout(() => setLinkCopied(false), 2000);
+                      }}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1 transition-all"
+                      style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                      {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <button onClick={downloadPDF}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+                style={{ background: "#0F4C5C", color: "white" }}>
+                <Download size={14} /> Download PDF copy
+              </button>
+              {standalone && !submissionId && (
+                <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
+                  Submit another report
+                </button>
+              )}
+              {!standalone && (
+                <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>
+                  Close
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {submitError && (
+                <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>
+                  {submitError}
+                </div>
+              )}
+              {!webhookUrl && (
+                <div className="mb-3 px-4 py-3 rounded-xl text-xs" style={{ background: "#FEF3C7", border: "1px solid rgba(180,83,9,0.2)", color: "#92400E" }}>
+                  No webhook configured — submitting will download the PDF locally instead.
+                </div>
+              )}
+
+              {/* Lift Details */}
+              <SectionHeader title="Lift Details" />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Location</div>
+                <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                  className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                  <option value="">Select building…</option>
+                  {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <InputRow label="Lift Identification (A/B/C/D…)" value={form.liftId} onChange={(v) => set("liftId", v)} />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <InputRow label="Date of Failure" value={form.dateOfFailure} onChange={(v) => set("dateOfFailure", v)} type="date" />
+                </div>
+                <div className="flex-1">
+                  <InputRow label="Time of Failure" value={form.timeOfFailure} onChange={(v) => set("timeOfFailure", v)} type="time" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <InputRow label="Time Reported" value={form.timeReported} onChange={(v) => set("timeReported", v)} type="time" />
+                </div>
+                <div className="flex-1">
+                  <InputRow label="Tech Arrived" value={form.timeTechArrived} onChange={(v) => set("timeTechArrived", v)} type="time" />
+                </div>
+              </div>
+              <InputRow label="Time Lift Restored" value={form.timeLiftRestored} onChange={(v) => set("timeLiftRestored", v)} type="time" />
+              <InputRow label="Service Provider" value={form.serviceProvider} onChange={(v) => set("serviceProvider", v)} />
+              <InputRow label="Technician Name" value={form.technicianName} onChange={(v) => set("technicianName", v)} />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Incident Reference No.</div>
+                  {form.building && BUILDING_CODES[form.building] && (
+                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                  )}
+                </div>
+                <input
+                  value={form.incidentRef}
+                  onChange={(e) => set("incidentRef", e.target.value)}
+                  placeholder={form.building ? "Select a building to generate" : "Or enter manually…"}
+                  className="w-full bg-transparent outline-none text-sm font-medium"
+                  style={{ color: "#0F0F0F" }}
+                />
+              </div>
+
+              {/* Section 1: RCA */}
+              <SectionHeader number="1" title="Root Cause Analysis (RCA)" />
+              <CheckRow label="Detailed RCA completed and attached" checked={form.rcaCompleted} onChange={(v) => set("rcaCompleted", v)} />
+              <TextareaRow label="Actual Cause of Failure" value={form.actualCause} onChange={(v) => set("actualCause", v)} rows={3} />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Failure Category</div>
+                {[
+                  ["electrical", "Electrical Fault"],
+                  ["mechanical", "Mechanical Fault"],
+                  ["control", "Control System Fault"],
+                  ["door", "Door System Fault"],
+                  ["safety", "Safety Circuit Fault"],
+                  ["external", "External Cause (Power Surge / Electrical Disturbance / Other)"],
+                  ["other", "Other"],
+                ].map(([key, label]) => (
+                  <RadioRow key={key} label={label} selected={form.failureCategory === key} onSelect={() => set("failureCategory", key)} />
+                ))}
+                {form.failureCategory === "other" && (
+                  <input value={form.failureCategoryOther} onChange={(e) => set("failureCategoryOther", e.target.value)}
+                    placeholder="Specify other cause…" className="w-full bg-transparent outline-none text-sm mt-1 px-1"
+                    style={{ color: "#0F0F0F", borderBottom: "1px solid rgba(0,0,0,0.1)" }} />
+                )}
+              </div>
+              <TextareaRow label="Description of Failure" value={form.failureDescription} onChange={(v) => set("failureDescription", v)} rows={4} />
+
+              {/* Section 2: Corrective Actions */}
+              <SectionHeader number="2" title="Corrective Actions Undertaken" />
+              <CheckRow label="Corrective actions completed and documented" checked={form.correctiveActionsCompleted} onChange={(v) => set("correctiveActionsCompleted", v)} />
+              {form.correctiveActions.map((row, i) => (
+                <div key={i} className="rounded-xl p-4 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase" style={{ color: "#8A7A5C" }}>Action {i + 1}</span>
+                    {form.correctiveActions.length > 1 && (
+                      <button onClick={() => removeCorrRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                    )}
+                  </div>
+                  <textarea value={row.action} onChange={(e) => updateCorrRow(i, "action", e.target.value)}
+                    placeholder="Description of action taken…" rows={2}
+                    className="w-full bg-transparent outline-none text-sm resize-none mb-3" style={{ color: "#0F0F0F", borderBottom: "1px solid rgba(0,0,0,0.06)" }} />
+                  <div className="flex gap-3 mt-2">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date completed</div>
+                      <input type="date" value={row.dateCompleted} onChange={(e) => updateCorrRow(i, "dateCompleted", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Technician</div>
+                      <input value={row.technician} onChange={(e) => updateCorrRow(i, "technician", e.target.value)}
+                        placeholder="Name" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <button onClick={addCorrRow} className="w-full py-2.5 rounded-xl text-sm font-semibold mb-2 transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
+                + Add Action
+              </button>
+
+              {/* Section 3: Components */}
+              <SectionHeader number="3" title="Components Repaired / Adjusted / Tested / Replaced" />
+              {form.components.map((row, i) => (
+                <div key={i} className="rounded-xl p-4 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase" style={{ color: "#8A7A5C" }}>Component {i + 1}</span>
+                    {form.components.length > 1 && (
+                      <button onClick={() => removeCompRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                    )}
+                  </div>
+                  <div className="flex gap-3 mb-3">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Component</div>
+                      <input value={row.component} onChange={(e) => updateCompRow(i, "component", e.target.value)}
+                        placeholder="Component name" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Action taken</div>
+                      <select value={row.actionTaken} onChange={(e) => updateCompRow(i, "actionTaken", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }}>
+                        <option value="">Select…</option>
+                        <option>Repair</option>
+                        <option>Adjust</option>
+                        <option>Test</option>
+                        <option>Replace</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Part number</div>
+                      <input value={row.partNumber} onChange={(e) => updateCompRow(i, "partNumber", e.target.value)}
+                        placeholder="Optional" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date completed</div>
+                      <input type="date" value={row.dateCompleted} onChange={(e) => updateCompRow(i, "dateCompleted", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <button onClick={addCompRow} className="w-full py-2.5 rounded-xl text-sm font-semibold mb-2 transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
+                + Add Component
+              </button>
+              <CheckRow label="All replaced components recorded" checked={form.componentsRecorded} onChange={(v) => set("componentsRecorded", v)} />
+              <CheckRow label="Testing completed after repairs" checked={form.testingCompleted} onChange={(v) => set("testingCompleted", v)} />
+              <CheckRow label="Lift safety checks completed" checked={form.safetyChecksCompleted} onChange={(v) => set("safetyChecksCompleted", v)} />
+
+              {/* Section 4: Temporary Measures */}
+              <SectionHeader number="4" title="Temporary Measures Implemented" />
+              <CheckRow label="Temporary measures implemented to restore service" checked={form.tempMeasuresImplemented} onChange={(v) => set("tempMeasuresImplemented", v)} />
+              <TextareaRow label="Details of Temporary Measures" value={form.tempMeasuresDetails} onChange={(v) => set("tempMeasuresDetails", v)} rows={3} />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <InputRow label="Duration From" value={form.tempMeasuresFrom} onChange={(v) => set("tempMeasuresFrom", v)} type="date" />
+                </div>
+                <div className="flex-1">
+                  <InputRow label="To" value={form.tempMeasuresTo} onChange={(v) => set("tempMeasuresTo", v)} type="date" />
+                </div>
+              </div>
+              <CheckRow label="Temporary measure removed after permanent repair" checked={form.tempMeasureRemoved} onChange={(v) => set("tempMeasureRemoved", v)} />
+              <CheckRow label="Temporary measure still active" checked={form.tempMeasureStillActive} onChange={(v) => set("tempMeasureStillActive", v)} />
+
+              {/* Section 5: Outstanding Actions */}
+              <SectionHeader number="5" title="Outstanding Remedial Actions" />
+              {form.outstandingActions.map((row, i) => (
+                <div key={i} className="rounded-xl p-4 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase" style={{ color: "#8A7A5C" }}>Item {i + 1}</span>
+                    {form.outstandingActions.length > 1 && (
+                      <button onClick={() => removeOutRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                    )}
+                  </div>
+                  <textarea value={row.action} onChange={(e) => updateOutRow(i, "action", e.target.value)}
+                    placeholder="Outstanding action…" rows={2}
+                    className="w-full bg-transparent outline-none text-sm resize-none mb-3" style={{ color: "#0F0F0F", borderBottom: "1px solid rgba(0,0,0,0.06)" }} />
+                  <div className="flex gap-3 mt-2">
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Responsible person</div>
+                      <input value={row.responsiblePerson} onChange={(e) => updateOutRow(i, "responsiblePerson", e.target.value)}
+                        placeholder="Name" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Due date</div>
+                      <input type="date" value={row.dueDate} onChange={(e) => updateOutRow(i, "dueDate", e.target.value)}
+                        className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Status</div>
+                    <input value={row.status} onChange={(e) => updateOutRow(i, "status", e.target.value)}
+                      placeholder="e.g. Pending, In Progress, Done" className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                </div>
+              ))}
+              <button onClick={addOutRow} className="w-full py-2.5 rounded-xl text-sm font-semibold mb-2 transition-all active:scale-[0.98]"
+                style={{ background: "white", border: "1px dashed rgba(0,0,0,0.15)", color: "#8A7A5C" }}>
+                + Add Outstanding Action
+              </button>
+              <CheckRow label="No outstanding actions" checked={form.noOutstandingActions} onChange={(v) => set("noOutstandingActions", v)} />
+              <CheckRow label="Outstanding actions communicated to Facilities Management" checked={form.outstandingCommunicated} onChange={(v) => set("outstandingCommunicated", v)} />
+
+              {/* Section 6: Risks */}
+              <SectionHeader number="6" title="Residual Operational / Reliability / Safety Risks" />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Remaining Risks Identified</div>
+                <CheckRow label="No residual risks identified" checked={form.noResidualRisks} onChange={(v) => set("noResidualRisks", v)} />
+                <CheckRow label="Operational Risk" checked={form.operationalRisk} onChange={(v) => set("operationalRisk", v)} />
+                <CheckRow label="Reliability Risk" checked={form.reliabilityRisk} onChange={(v) => set("reliabilityRisk", v)} />
+                <CheckRow label="Safety Risk" checked={form.safetyRisk} onChange={(v) => set("safetyRisk", v)} />
+                <CheckRow label="Compliance Risk" checked={form.complianceRisk} onChange={(v) => set("complianceRisk", v)} />
+              </div>
+              <TextareaRow label="Risk Details" value={form.riskDetails} onChange={(v) => set("riskDetails", v)} rows={3} />
+              <TextareaRow label="Recommended Mitigation Measures" value={form.mitigationMeasures} onChange={(v) => set("mitigationMeasures", v)} rows={3} />
+
+              {/* Section 7: Final Verification */}
+              <SectionHeader number="7" title="Final Verification & Sign-Off" />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Lift Operational Status</div>
+                <RadioRow label="Fully Operational" selected={form.operationalStatus === "fully"} onSelect={() => set("operationalStatus", "fully")} />
+                <RadioRow label="Operational with Monitoring Required" selected={form.operationalStatus === "monitoring"} onSelect={() => set("operationalStatus", "monitoring")} />
+                <RadioRow label="Out of Service" selected={form.operationalStatus === "outofservice"} onSelect={() => set("operationalStatus", "outofservice")} />
+              </div>
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Final Testing Completed</div>
+                <RadioRow label="Yes" selected={form.finalTestingCompleted === true} onSelect={() => set("finalTestingCompleted", true)} />
+                <RadioRow label="No" selected={form.finalTestingCompleted === false} onSelect={() => set("finalTestingCompleted", false)} />
+              </div>
+              <InputRow label="Monitoring Period Required" value={form.monitoringPeriod} onChange={(v) => set("monitoringPeriod", v)} placeholder="e.g. 2 weeks" />
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Service Provider Confirmation</div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Name</div>
+                    <input value={form.serviceProviderName} onChange={(e) => set("serviceProviderName", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date</div>
+                    <input type="date" value={form.serviceProviderDate} onChange={(e) => set("serviceProviderDate", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Facilities Management Verification</div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Name</div>
+                    <input value={form.fmName} onChange={(e) => set("fmName", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xs mb-1" style={{ color: "#8A7A5C" }}>Date</div>
+                    <input type="date" value={form.fmDate} onChange={(e) => set("fmDate", e.target.value)}
+                      className="w-full bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="uppercase mb-3" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Landlord Notification Completed</div>
+                <RadioRow label="Yes" selected={form.landlordNotified === true} onSelect={() => set("landlordNotified", true)} />
+                <RadioRow label="No" selected={form.landlordNotified === false} onSelect={() => set("landlordNotified", false)} />
+              </div>
+              <InputRow label="Incident Closed Date" value={form.incidentClosedDate} onChange={(v) => set("incidentClosedDate", v)} type="date" />
+
+              {/* Email & Submit */}
+              <SectionHeader title="Send Report" />
+              <InputRow label="Recipient Email Address" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="e.g. facilities@company.com" />
+              <div className="flex gap-2 mt-2">
+                <button onClick={downloadPDF}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  style={{ background: "white", border: "1px solid rgba(0,0,0,0.1)", color: "#0F0F0F" }}>
+                  <Download size={14} /> Download PDF
+                </button>
+                <button onClick={handleSubmit} disabled={submitting}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                  {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                  {submitting ? "Sending…" : webhookUrl ? "Send via Email" : "Download PDF"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+    </div>
+  );
+
+  if (standalone) return content;
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }}>
+      {content}
+    </div>
+  );
+}
+
+function CheckToggle({ value, onChange }) {
+  return (
+    <div className="flex gap-1">
+      {[["pass", "P", "#15803D", "#DCFCE7"], ["fail", "F", "#B91C1C", "#FEE2E2"], ["na", "N/A", "#6B7280", "#F3F4F6"]].map(([v, label, activeColor, activeBg]) => (
+        <button key={v} type="button" onClick={() => onChange(value === v ? "" : v)}
+          className="px-2 py-0.5 rounded text-xs font-semibold transition-all"
+          style={{
+            background: value === v ? activeBg : "transparent",
+            color: value === v ? activeColor : "#8A7A5C",
+            border: `1px solid ${value === v ? activeColor + "50" : "#D4C7B0"}`,
+          }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TenantFireSheet({ webhookUrl, onClose, standalone = false, name = "Tenant Fire Inspection", onSave, initialData = null, submissionId = null }) {
+  const [form, setForm] = useState(initialData || TENANT_FIRE_INITIAL);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [savedId, setSavedId] = useState(submissionId);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+
+  const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+  const setRow = (i, field, val) => setForm((f) => ({
+    ...f, rows: f.rows.map((r, ri) => ri === i ? { ...r, [field]: val } : r),
+  }));
+  const addRow = () => setForm((f) => ({ ...f, rows: [...f.rows, blankTenantFireRow()] }));
+  const removeRow = (i) => setForm((f) => ({ ...f, rows: f.rows.filter((_, ri) => ri !== i) }));
+
+  useEffect(() => {
+    if (submissionId) return;
+    if (form.building) {
+      generateIncidentRef(form.building, "tenant-fire").then((ref) => set("incidentRef", ref));
+    } else {
+      set("incidentRef", "");
+    }
+  }, [form.building]);
+
+  const downloadPDF = () => {
+    const fileName = `tenant-fire-${form.incidentRef || form.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    generateTenantFirePDF(form).save(fileName);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!onSave) return;
+    setSavingDraft(true);
+    setSubmitError("");
+    try {
+      const existingId = savedId || submissionId || null;
+      const fileName = `tenant-fire-${form.incidentRef || form.building || "draft"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const retId = await onSave(form, fileName, existingId);
+      if (retId && !existingId) setSavedId(retId);
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (err) {
+      setSubmitError(`Save failed: ${err.message}`);
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!form.building) { setSubmitError("Please select a building."); return; }
+    if (!form.inspector.trim()) { setSubmitError("Please enter the inspector's name."); return; }
+    if (!form.recipientEmail.trim()) { setSubmitError("Please enter a recipient email address."); return; }
+    setSubmitting(true); setSubmitError("");
+    try {
+      let finalForm = form;
+      if (!submissionId && form.building) {
+        const freshRef = await generateIncidentRef(form.building, "tenant-fire");
+        finalForm = { ...form, incidentRef: freshRef };
+        setForm(finalForm);
+      }
+      const fileName = `tenant-fire-${finalForm.incidentRef || finalForm.building || "report"}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = generateTenantFirePDF(finalForm);
+      let resolvedId = submissionId;
+
+      if (onSave && submissionId) {
+        await onSave(finalForm, fileName, submissionId);
+      } else if (standalone && !submissionId && onSave) {
+        resolvedId = await onSave(finalForm, fileName, null);
+      }
+
+      const editLink = resolvedId
+        ? `${window.location.origin}${window.location.pathname}?edit=${resolvedId}`
+        : null;
+
+      if (webhookUrl) {
+        const pdfBase64 = doc.output("datauristring");
+        const res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "checklist_submission",
+            timestamp: new Date().toISOString(),
+            recipientEmail: finalForm.recipientEmail,
+            incidentRef: finalForm.incidentRef,
+            building: finalForm.building,
+            inspector: finalForm.inspector,
+            date: finalForm.inspectionPeriod,
+            formData: finalForm,
+            pdfBase64,
+            pdfFileName: fileName,
+            editLink,
+          }),
+        });
+        if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      } else {
+        doc.save(fileName);
+      }
+
+      if (onSave && !submissionId && !standalone) {
+        const retId = await onSave(finalForm, fileName, resolvedId);
+        if (retId && !resolvedId) resolvedId = retId;
+      }
+
+      setSavedId(resolvedId);
+      setSubmitted(true);
+    } catch (err) {
+      setSubmitError(err.message || "Submission failed. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => { setForm(TENANT_FIRE_INITIAL); setSubmitted(false); setSavedId(null); };
+
+  const wrapperCls = standalone ? "min-h-screen flex flex-col" : "absolute inset-0 flex flex-col sheet-anim";
+  return (
+    <div className={wrapperCls} style={{ background: "#FAF6EE" }}>
+      {/* Header — matches BCA/Generator pattern */}
+      <div className="px-5 pt-4 pb-3 flex items-center justify-between flex-shrink-0"
+        style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#FAF6EE" }}>
+        {standalone ? (
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#B91C1C" }}>
+              <ShieldCheck size={13} style={{ color: "white" }} />
+            </div>
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#8A7A5C" }}>Fire Inspection</span>
+          </div>
+        ) : (
+          <button onClick={onClose} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#8A7A5C" }}>← Back</button>
+        )}
+        <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>{name}</span>
+        <div className="flex items-center gap-2">
+          {!submitted && (
+            <button onClick={downloadPDF} title="Download PDF"
+              className="flex items-center justify-center w-8 h-8 rounded-xl transition-all active:scale-95"
+              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
+              <Download size={14} />
+            </button>
+          )}
+          {!submitted && (
+            <button onClick={handleSaveDraft} disabled={savingDraft || submitting}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: draftSaved ? "rgba(21,128,61,0.12)" : "#F0EBE0", color: draftSaved ? "#15803D" : "#3F3A2E" }}>
+              {savingDraft ? <Loader2 size={12} className="animate-spin" /> : draftSaved ? <CheckCircle2 size={12} /> : null}
+              {savingDraft ? "Saving…" : draftSaved ? "Saved" : "Save"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 pt-3 pb-8">
+        {submitted ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-5" style={{ background: "#DCFCE7" }}>
+              <CheckCircle2 size={28} style={{ color: "#15803D" }} />
+            </div>
+            <h2 className="font-display text-xl font-bold mb-1" style={{ color: "#0F0F0F" }}>Report Submitted</h2>
+            <p className="text-sm mb-6" style={{ color: "#8A7A5C" }}>
+              Sent to {form.recipientEmail}.
+            </p>
+            {standalone && savedId && (
+              <div className="w-full max-w-sm mb-5 p-4 rounded-2xl text-left"
+                style={{ background: "rgba(15,76,92,0.06)", border: "1px solid rgba(15,76,92,0.18)" }}>
+                <p className="text-xs font-semibold mb-0.5" style={{ color: "#0F4C5C" }}>Save your edit link</p>
+                <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Use this link to reopen and update this report at any time.</p>
+                <div className="flex gap-2">
+                  <input readOnly value={`${window.location.origin}${window.location.pathname}?edit=${savedId}`}
+                    className="flex-1 text-xs px-3 py-2 rounded-xl outline-none truncate"
+                    style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.08)" }} />
+                  <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?edit=${savedId}`); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 flex items-center gap-1"
+                    style={{ background: linkCopied ? "rgba(21,128,61,0.1)" : "#0F4C5C", color: linkCopied ? "#15803D" : "white" }}>
+                    {linkCopied ? <><Check size={11} /> Copied!</> : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
+            <button onClick={downloadPDF}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold mb-3 transition-all active:scale-95"
+              style={{ background: "#0F4C5C", color: "white" }}>
+              <Download size={14} /> Download PDF copy
+            </button>
+            {standalone && !submissionId && (
+              <button onClick={resetForm} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Submit another report</button>
+            )}
+            {!standalone && (
+              <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+            )}
+          </div>
+        ) : (
+          <>
+            {submitError && (
+              <div className="mb-3 px-4 py-3 rounded-xl text-sm" style={{ background: "#FEF2F2", border: "1px solid rgba(185,28,28,0.2)", color: "#B91C1C" }}>{submitError}</div>
+            )}
+
+            <SectionHeader title="Inspection Details" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Building / Centre</div>
+              <select value={form.building} onChange={(e) => set("building", e.target.value)}
+                className="w-full bg-transparent outline-none text-sm" style={{ color: form.building ? "#0F0F0F" : "#8A7A5C" }}>
+                <option value="">Select building…</option>
+                {MASTER_PROPERTIES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <InputRow label="Inspection Period" value={form.inspectionPeriod} onChange={(v) => set("inspectionPeriod", v)} placeholder="e.g. Jan 2026 / Q1 2026" />
+            <InputRow label="Inspected By" value={form.inspector} onChange={(v) => set("inspector", v)} placeholder="Full name" />
+            <div className="rounded-xl px-4 py-3 mb-2" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+              <div className="flex items-center justify-between mb-1">
+                <div className="uppercase" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>Reference No.</div>
+                {form.building && BUILDING_CODES[form.building] && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>auto-generated</span>
+                )}
+              </div>
+              <input value={form.incidentRef} onChange={(e) => set("incidentRef", e.target.value)}
+                placeholder="Select a building to generate"
+                className="w-full bg-transparent outline-none text-sm font-medium" style={{ color: "#0F0F0F" }} />
+            </div>
+            <InputRow label="Recipient Email" value={form.recipientEmail} onChange={(v) => set("recipientEmail", v)} type="email" placeholder="facilities@company.com" />
+
+            <SectionHeader title="Tenant Inspections" />
+            <div className="rounded-xl px-4 py-2.5 mb-3 text-xs" style={{ background: "#F0EBE0", color: "#8A7A5C" }}>
+              <span className="font-semibold" style={{ color: "#3F3A2E" }}>Legend</span>
+              {" — "}
+              <span className="font-semibold" style={{ color: "#15803D" }}>P</span> = Pass (compliant) ·{" "}
+              <span className="font-semibold" style={{ color: "#B91C1C" }}>F</span> = Fail (non-compliant) ·{" "}
+              <span className="font-semibold" style={{ color: "#6B7280" }}>N/A</span> = Not applicable
+            </div>
+
+            {form.rows.map((row, i) => (
+              <div key={i} className="rounded-2xl p-4 mb-3" style={{ background: "white", border: "1px solid rgba(0,0,0,0.07)" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8A7A5C" }}>
+                    {row.shopNo ? `Shop ${row.shopNo}` : row.tenantName || `Tenant ${i + 1}`}
+                  </p>
+                  {form.rows.length > 1 && (
+                    <button onClick={() => removeRow(i)} className="text-xs font-semibold" style={{ color: "#B91C1C" }}>Remove</button>
+                  )}
+                </div>
+                <div className="flex gap-3 mb-3">
+                  <div className="w-20">
+                    <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Shop #</div>
+                    <input value={row.shopNo} onChange={(e) => setRow(i, "shopNo", e.target.value)}
+                      placeholder="e.g. 12" className="w-full bg-transparent outline-none text-sm"
+                      style={{ color: "#0F0F0F", borderBottom: "1px solid #E5DDD0", paddingBottom: "3px" }} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Tenant Name</div>
+                    <input value={row.tenantName} onChange={(e) => setRow(i, "tenantName", e.target.value)}
+                      placeholder="Trading name" className="w-full bg-transparent outline-none text-sm"
+                      style={{ color: "#0F0F0F", borderBottom: "1px solid #E5DDD0", paddingBottom: "3px" }} />
+                  </div>
+                </div>
+
+                {TENANT_FIRE_CHECKS.map(({ key, label, sub }) => (
+                  <div key={key} className="flex items-center justify-between py-2.5" style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
+                    <div className="flex-1 mr-3 min-w-0">
+                      <p className="text-xs font-semibold" style={{ color: "#0F0F0F" }}>{label}</p>
+                      <p className="text-xs leading-tight" style={{ color: "#8A7A5C" }}>{sub}</p>
+                    </div>
+                    <CheckToggle value={row[key]} onChange={(v) => setRow(i, key, v)} />
+                  </div>
+                ))}
+
+                <div className="pt-3" style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
+                  <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "9px", letterSpacing: "0.12em" }}>Comments / Observations / Action required</div>
+                  <textarea value={row.comments} onChange={(e) => setRow(i, "comments", e.target.value)}
+                    rows={2} placeholder="Any issues, actions required…"
+                    className="w-full bg-transparent outline-none text-sm resize-none"
+                    style={{ color: "#0F0F0F", borderBottom: "1px solid #E5DDD0", paddingBottom: "3px" }} />
+                </div>
+              </div>
+            ))}
+
+            <button onClick={addRow}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold mb-4 transition-all active:scale-[0.98]"
+              style={{ background: "#F0EBE0", color: "#3F3A2E", border: "1px dashed rgba(0,0,0,0.15)" }}>
+              <Plus size={14} /> Add Tenant
+            </button>
+
+            <SectionHeader title="Send Report" />
+            <div className="flex gap-3 mt-2">
+              <button onClick={handleSubmit} disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ background: submitting ? "#E5DFD5" : "#0F0F0F", color: submitting ? "#8A7A5C" : "white" }}>
+                {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                {submitting ? (submissionId ? "Updating…" : "Sending…") : (submissionId ? "Update & Email" : webhookUrl ? "Send via Email" : "Download PDF")}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
