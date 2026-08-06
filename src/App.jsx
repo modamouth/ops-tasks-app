@@ -2419,6 +2419,7 @@ export default function App() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
+  const [checklistInitialTab, setChecklistInitialTab] = useState("checklists");
   const [registerOpen, setRegisterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [activeView, setActiveView] = useState("home");
@@ -2769,9 +2770,10 @@ export default function App() {
       case "duetoday":
         setActiveStatus("all"); setGroupBy("due"); setActiveView("tasks"); break;
       case "checklists":
-        setChecklistOpen(true); break;
-      case "analytics":
+        setChecklistInitialTab("checklists"); setChecklistOpen(true); break;
       case "reports":
+        setChecklistInitialTab("submissions"); setChecklistOpen(true); break;
+      case "analytics":
         setActiveView("analytics"); break;
       case "people":
         setActiveView("people"); break;
@@ -2825,7 +2827,7 @@ export default function App() {
                 <button onClick={() => setRegisterOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Asset & Certificate Register" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                   <Building2 size={15} />
                 </button>
-                <button onClick={() => setChecklistOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Checklists" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                <button onClick={() => { setChecklistInitialTab("checklists"); setChecklistOpen(true); }} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Checklists" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
                   <ClipboardList size={15} />
                 </button>
                 <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
@@ -3011,6 +3013,7 @@ export default function App() {
         {checklistOpen && (
           <ChecklistDashboard
             webhookUrl={webhookUrl}
+            initialTab={checklistInitialTab}
             onClose={() => setChecklistOpen(false)}
           />
         )}
@@ -3207,7 +3210,7 @@ function HomeView({ now, homeStats, onNavigate }) {
     { key: "checklists", label: "Checklists", desc: "SOPs and inspections", icon: <ClipboardList size={18} />, color: { bg: "#EDE9FE", color: "#6D28D9" } },
     { key: "analytics", label: "Analytics", desc: "Insights and performance data", icon: <BarChart2 size={18} />, color: { bg: "#CCFBF1", color: "#0F766E" } },
     { key: "people", label: "People", desc: "Teams, assignees and contacts", icon: <Users size={18} />, color: { bg: "#FEF3C7", color: "#B45309" } },
-    { key: "reports", label: "Reports", desc: "Generate and view reports", icon: <FileText size={18} />, color: { bg: "#DBEAFE", color: "#1D4ED8" } },
+    { key: "reports", label: "Reports", desc: "Checklist submissions and PDFs", icon: <FileText size={18} />, color: { bg: "#DBEAFE", color: "#1D4ED8" } },
   ];
 
   return (
@@ -5110,23 +5113,27 @@ function BCASheet({ webhookUrl, onClose, standalone = false, name = "Building Co
   );
 }
 
-function ChecklistDashboard({ webhookUrl, onClose }) {
+function ChecklistDashboard({ webhookUrl, onClose, initialTab = "checklists" }) {
   const [activeId, setActiveId] = useState(null);
   const [editingSubmission, setEditingSubmission] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
-  const [tab, setTab] = useState("checklists");
+  const [tab, setTab] = useState(initialTab);
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [loadingEditId, setLoadingEditId] = useState(null);
 
+  // Excludes form_data — it embeds base64 photo blobs that can balloon a single
+  // submission to several MB, which made the list take forever to load.
   const fetchSubmissions = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
       const { data, error } = await supabase
         .from("checklist_submissions")
-        .select("*")
+        .select("id, checklist_id, incident_ref, building, lift_id, date_of_failure, submitted_at, pdf_file_name, score, result, archived, recipientEmail:form_data->>recipientEmail")
         .order("submitted_at", { ascending: false });
       if (error) throw error;
       setSubmissions(data || []);
@@ -5136,6 +5143,18 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
       setLoading(false);
     }
   }, []);
+
+  // form_data (with any embedded photos) is only fetched on demand — for an
+  // actual PDF re-download or edit — not for every row in the list.
+  const fetchFullSubmission = async (id) => {
+    const { data, error } = await supabase
+      .from("checklist_submissions")
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+    return data;
+  };
 
   useEffect(() => { fetchSubmissions(); }, [fetchSubmissions]);
 
@@ -5196,10 +5215,29 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
     await supabase.from("checklist_submissions").update({ archived: archive }).eq("id", id);
   };
 
-  const redownload = (sub) => {
-    const entry = CHECKLIST_REGISTRY.find((c) => c.id === sub.checklist_id);
-    const fileName = sub.pdf_file_name || `${sub.checklist_id || "report"}-${sub.incident_ref || "report"}.pdf`;
-    (entry?.generatePDF || generateChecklistPDF)(sub.form_data).save(fileName);
+  const redownload = async (sub) => {
+    setDownloadingId(sub.id);
+    try {
+      const full = await fetchFullSubmission(sub.id);
+      const entry = CHECKLIST_REGISTRY.find((c) => c.id === full.checklist_id);
+      const fileName = full.pdf_file_name || `${full.checklist_id || "report"}-${full.incident_ref || "report"}.pdf`;
+      (entry?.generatePDF || generateChecklistPDF)(full.form_data).save(fileName);
+    } catch {
+      alert("Could not download PDF. Please try again.");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const openEdit = async (sub) => {
+    setLoadingEditId(sub.id);
+    try {
+      setEditingSubmission(await fetchFullSubmission(sub.id));
+    } catch {
+      alert("Could not load submission for editing. Please try again.");
+    } finally {
+      setLoadingEditId(null);
+    }
   };
 
   const fmtSubmittedAt = (iso) => {
@@ -5360,15 +5398,15 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
                           {sub.date_of_failure && <span>Failure: {sub.date_of_failure}</span>}
                           <span>Submitted: {fmtSubmittedAt(sub.submitted_at)}</span>
                         </div>
-                        {sub.form_data?.recipientEmail && (
-                          <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.form_data.recipientEmail}</p>
+                        {sub.recipientEmail && (
+                          <p className="text-xs mb-3" style={{ color: "#8A7A5C" }}>Sent to: {sub.recipientEmail}</p>
                         )}
                         {showArchived ? (
                           <div className="flex gap-2">
-                            <button onClick={() => redownload(sub)}
+                            <button onClick={() => redownload(sub)} disabled={downloadingId === sub.id}
                               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
-                              <Download size={13} /> Download PDF
+                              style={{ background: "#F0EBE0", color: "#3F3A2E", opacity: downloadingId === sub.id ? 0.6 : 1 }}>
+                              {downloadingId === sub.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
                             </button>
                             <button onClick={() => archiveSubmission(sub.id, false)}
                               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
@@ -5378,15 +5416,15 @@ function ChecklistDashboard({ webhookUrl, onClose }) {
                           </div>
                         ) : (
                           <div className="flex gap-2">
-                            <button onClick={() => redownload(sub)}
+                            <button onClick={() => redownload(sub)} disabled={downloadingId === sub.id}
                               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                              style={{ background: "#F0EBE0", color: "#3F3A2E" }}>
-                              <Download size={13} /> Download PDF
+                              style={{ background: "#F0EBE0", color: "#3F3A2E", opacity: downloadingId === sub.id ? 0.6 : 1 }}>
+                              {downloadingId === sub.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
                             </button>
-                            <button onClick={() => setEditingSubmission(sub)}
+                            <button onClick={() => openEdit(sub)} disabled={loadingEditId === sub.id}
                               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                              style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)" }}>
-                              Edit
+                              style={{ background: "white", color: "#0F0F0F", border: "1px solid rgba(0,0,0,0.1)", opacity: loadingEditId === sub.id ? 0.6 : 1 }}>
+                              {loadingEditId === sub.id ? <Loader2 size={13} className="animate-spin" /> : "Edit"}
                             </button>
                             <button onClick={() => archiveSubmission(sub.id, true)}
                               className="flex items-center justify-center px-3 py-2 rounded-xl transition-all active:scale-[0.98]"
