@@ -6,8 +6,9 @@ import {
   Loader2, ChevronDown, Phone, MessageCircle, Tag, Camera, Trash2,
   Wifi, WifiOff, ChevronRight, ListFilter, ArrowUpDown, Download,
   ClipboardList, Send, Archive, BarChart2, Building2, ShieldCheck, Wrench, AlertTriangle, Calendar, RepeatIcon, LayoutGrid,
+  Users, FileText, Home as HomeIcon,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { createClient } from "@supabase/supabase-js";
@@ -2419,12 +2420,14 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
-  const [activeView, setActiveView] = useState("tasks");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [activeView, setActiveView] = useState("home");
   const [syncing, setSyncing] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [lastSync, setLastSync] = usePersistedState("ops.lastSync", new Date().toISOString());
   const [syncError, setSyncError] = useState("");
   const [now, setNow] = useState(new Date());
+  const navigate = useNavigate();
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
@@ -2726,6 +2729,58 @@ export default function App() {
     return { open, overdue, buildings: buildings.size };
   }, [tasks]);
 
+  const homeStats = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const props = activeProperty === "All properties" ? tasks : tasks.filter((t) => t.property === activeProperty);
+    let overdue = 0, dueToday = 0;
+    props.forEach((t) => {
+      if (t.status === DONE_STATUS || t.status === ARCHIVED_STATUS || !t.dueDate) return;
+      const d = new Date(t.dueDate + "T00:00:00");
+      if (isNaN(d.getTime())) return;
+      if (d < today) overdue++;
+      else if (d.getTime() === today.getTime()) dueToday++;
+    });
+    return {
+      total: counts.all,
+      pending: counts.Pending,
+      inProgress: counts["In Progress"],
+      open: counts.Pending + counts["In Progress"],
+      overdue,
+      dueToday,
+    };
+  }, [tasks, activeProperty, counts]);
+
+  const peopleStats = useMemo(() => {
+    const props = activeProperty === "All properties" ? tasks : tasks.filter((t) => t.property === activeProperty);
+    return teamOptions.map((name) => {
+      const personTasks = props.filter((t) => t.assignee === name && t.status !== ARCHIVED_STATUS);
+      return { name, open: personTasks.filter((t) => t.status !== DONE_STATUS).length, total: personTasks.length };
+    });
+  }, [tasks, teamOptions, activeProperty]);
+
+  const handleHomeNavigate = (key) => {
+    switch (key) {
+      case "tasks":
+        setActiveStatus("all"); setActiveView("tasks"); break;
+      case "pending":
+        setActiveStatus("Pending"); setActiveView("tasks"); break;
+      case "inprogress":
+        setActiveStatus("In Progress"); setActiveView("tasks"); break;
+      case "duetoday":
+        setActiveStatus("all"); setGroupBy("due"); setActiveView("tasks"); break;
+      case "checklists":
+        setChecklistOpen(true); break;
+      case "analytics":
+      case "reports":
+        setActiveView("analytics"); break;
+      case "people":
+        setActiveView("people"); break;
+      case "buildings":
+        navigate("/buildings"); break;
+      default: break;
+    }
+  };
+
   if (!authed) return <LoginScreen onUnlock={tryUnlock} />;
 
   return (
@@ -2754,29 +2809,31 @@ export default function App() {
         }}
       >
         <div className="px-6 pt-6 pb-4" style={{ background: "#FAF6EE" }}>
-          <div className="flex items-start justify-between mb-3">
-            <div>
-              <p className="text-xs uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.15em" }}>Operations</p>
-              <h1 className="font-display text-3xl leading-none mt-1" style={{ color: "#0F0F0F", fontWeight: 500 }}>Today</h1>
-              <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>
-                {now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
-              </p>
+          {activeView !== "home" && (
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <p className="text-xs uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.15em" }}>Operations</p>
+                <h1 className="font-display text-3xl leading-none mt-1" style={{ color: "#0F0F0F", fontWeight: 500 }}>Today</h1>
+                <p className="text-sm mt-1" style={{ color: "#8A7A5C" }}>
+                  {now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={refresh} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                  {syncing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                </button>
+                <button onClick={() => setRegisterOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Asset & Certificate Register" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                  <Building2 size={15} />
+                </button>
+                <button onClick={() => setChecklistOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Checklists" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                  <ClipboardList size={15} />
+                </button>
+                <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
+                  <Settings size={15} />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button onClick={refresh} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
-                {syncing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-              </button>
-              <button onClick={() => setRegisterOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Asset & Certificate Register" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
-                <Building2 size={15} />
-              </button>
-              <button onClick={() => setChecklistOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" title="Checklists" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
-                <ClipboardList size={15} />
-              </button>
-              <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "white", border: "1px solid rgba(0,0,0,0.08)" }}>
-                <Settings size={15} />
-              </button>
-            </div>
-          </div>
+          )}
 
           <PropertyDropdown value={activeProperty} onChange={setActiveProperty} options={propertyOptions} />
 
@@ -2813,28 +2870,6 @@ export default function App() {
           })()}
         </div>
 
-        <div className="flex px-4 py-2 gap-1" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-          {[{ id: "tasks", label: "Tasks" }, { id: "analytics", label: "Analytics" }].map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setActiveView(v.id)}
-              className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
-              style={{ background: activeView === v.id ? "#0F0F0F" : "transparent", color: activeView === v.id ? "white" : "#8A7A5C" }}
-            >
-              {v.id === "analytics" && <BarChart2 size={11} />}
-              {v.label}
-            </button>
-          ))}
-          <Link
-            to="/buildings"
-            className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
-            style={{ color: "#8A7A5C", textDecoration: "none" }}
-          >
-            <LayoutGrid size={11} />
-            Buildings
-          </Link>
-        </div>
-
         {activeView === "tasks" && (
           <div className="px-6 py-3 flex gap-2 overflow-x-auto scrollbar-hide" style={{ background: "#FAF6EE", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
             {statusChips.map((p) => (
@@ -2854,7 +2889,14 @@ export default function App() {
         />
 
         <div className="overflow-y-auto flex-1 scrollbar-hide" style={{ background: "#FAF6EE" }}>
-          {activeView === "analytics" ? (
+          {activeView === "home" ? (
+            <HomeView now={now} homeStats={homeStats} onNavigate={handleHomeNavigate} />
+          ) : activeView === "people" ? (
+            <PeopleView
+              peopleStats={peopleStats}
+              onSelectPerson={(name) => { setSearch(name); setActiveView("tasks"); }}
+            />
+          ) : activeView === "analytics" ? (
             <AnalyticsView tasks={tasks} archivedAtMap={archivedAtMap} />
           ) : (
             <>
@@ -2922,11 +2964,12 @@ export default function App() {
           )}
         </div>
 
-        {activeView === "tasks" && (
-          <button onClick={() => setNewTaskOpen(true)} className="absolute bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center transition-all active:scale-95" style={{ background: "#0F0F0F", color: "white", boxShadow: "0 10px 30px -5px rgba(0,0,0,0.4)" }}>
-            <Plus size={22} strokeWidth={2.5} />
-          </button>
-        )}
+        <BottomNav
+          activeView={activeView}
+          setActiveView={setActiveView}
+          onAdd={() => setNewTaskOpen(true)}
+          onMore={() => setMoreOpen(true)}
+        />
 
         {openTask && (
           <TaskDetailSheet
@@ -2975,6 +3018,268 @@ export default function App() {
             onClose={() => setSettingsOpen(false)}
           />
         )}
+        {moreOpen && (
+          <MoreSheet
+            onClose={() => setMoreOpen(false)}
+            onOpenRegister={() => { setMoreOpen(false); setRegisterOpen(true); }}
+            onOpenSettings={() => { setMoreOpen(false); setSettingsOpen(true); }}
+            onRefresh={refresh}
+            syncing={syncing}
+            lastSync={lastSync}
+            isOnline={isOnline}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bottom navigation ----------
+function NavButton({ active, icon, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-center gap-0.5 px-2 py-1 transition-all active:scale-95"
+      style={{ color: active ? "#EA580C" : "#8A7A5C" }}
+    >
+      {icon}
+      <span className="text-[10px] font-medium">{label}</span>
+    </button>
+  );
+}
+
+function BottomNav({ activeView, setActiveView, onAdd, onMore }) {
+  return (
+    <div
+      className="flex items-center justify-around px-2 pt-2 pb-3 flex-shrink-0"
+      style={{ background: "white", borderTop: "1px solid rgba(0,0,0,0.06)" }}
+    >
+      <NavButton active={activeView === "home"} icon={<HomeIcon size={20} />} label="Home" onClick={() => setActiveView("home")} />
+      <NavButton active={activeView === "tasks"} icon={<ListFilter size={20} />} label="Tasks" onClick={() => setActiveView("tasks")} />
+      <button
+        type="button"
+        onClick={onAdd}
+        className="w-12 h-12 rounded-full flex items-center justify-center -mt-6 transition-all active:scale-95"
+        style={{ background: "#EA580C", color: "white", boxShadow: "0 8px 20px -4px rgba(234,88,12,0.5)" }}
+      >
+        <Plus size={22} strokeWidth={2.5} />
+      </button>
+      <Link
+        to="/buildings"
+        className="flex flex-col items-center gap-0.5 px-2 py-1"
+        style={{ textDecoration: "none", color: "#8A7A5C" }}
+      >
+        <Building2 size={20} />
+        <span className="text-[10px] font-medium">Buildings</span>
+      </Link>
+      <NavButton active={false} icon={<MoreHorizontal size={20} />} label="More" onClick={onMore} />
+    </div>
+  );
+}
+
+// ---------- More sheet ----------
+function MoreSheet({ onClose, onOpenRegister, onOpenSettings, onRefresh, syncing, lastSync, isOnline }) {
+  const items = [
+    {
+      key: "register",
+      icon: <Building2 size={18} />,
+      label: "Asset & Certificate Register",
+      desc: "Assets, compliance certs, PM schedules",
+      color: { bg: "#D1FAE5", color: "#047857" },
+      onClick: onOpenRegister,
+    },
+    {
+      key: "settings",
+      icon: <Settings size={18} />,
+      label: "Settings",
+      desc: "Data source, notifications, app password",
+      color: { bg: "#F3F4F6", color: "#374151" },
+      onClick: onOpenSettings,
+    },
+  ];
+
+  return (
+    <div className="absolute inset-0 z-30 fade-anim" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
+      <div
+        className="absolute bottom-0 left-0 right-0 sheet-anim rounded-t-3xl overflow-hidden"
+        style={{ background: "#FAF6EE" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          <span className="font-display text-base font-semibold" style={{ color: "#0F0F0F" }}>More</span>
+          <button onClick={onClose} className="text-sm font-semibold" style={{ color: "#8A7A5C" }}>Close</button>
+        </div>
+        <div className="px-4 py-3 pb-6">
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl mb-2 transition-all active:scale-[0.98]"
+            style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}
+          >
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: isOnline ? "#DBEAFE" : "#FEF3C7" }}>
+              {syncing ? (
+                <Loader2 size={16} className="animate-spin" style={{ color: "#1D4ED8" }} />
+              ) : isOnline ? (
+                <Wifi size={16} style={{ color: "#1D4ED8" }} />
+              ) : (
+                <WifiOff size={16} style={{ color: "#B45309" }} />
+              )}
+            </div>
+            <div className="flex-1 text-left min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>{syncing ? "Syncing…" : "Sync now"}</p>
+              <p className="text-xs" style={{ color: "#8A7A5C" }}>Last synced {timeAgo(lastSync)}</p>
+            </div>
+          </button>
+          {items.map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              onClick={it.onClick}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl mb-2 transition-all active:scale-[0.98]"
+              style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}
+            >
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: it.color.bg, color: it.color.color }}>
+                {it.icon}
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>{it.label}</p>
+                <p className="text-xs truncate" style={{ color: "#8A7A5C" }}>{it.desc}</p>
+              </div>
+              <ChevronRight size={14} style={{ color: "#8A7A5C" }} />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Home dashboard ----------
+function HomeView({ now, homeStats, onNavigate }) {
+  const statCards = [
+    {
+      key: "tasks",
+      label: "Tasks",
+      sub: `${homeStats.open} open${homeStats.overdue > 0 ? ` · ${homeStats.overdue} overdue` : ""}`,
+      value: homeStats.total,
+      icon: <ClipboardList size={18} />,
+      color: { bg: "#FFE4D5", color: "#C2410C" },
+      overdue: homeStats.overdue > 0,
+    },
+    {
+      key: "pending",
+      label: "Pending",
+      sub: "Tasks",
+      value: homeStats.pending,
+      icon: <Clock size={18} />,
+      color: { bg: "#FEF3C7", color: "#B45309" },
+    },
+    {
+      key: "inprogress",
+      label: "In progress",
+      sub: "Tasks",
+      value: homeStats.inProgress,
+      icon: <Circle size={18} />,
+      color: { bg: "#DBEAFE", color: "#1D4ED8" },
+    },
+    {
+      key: "duetoday",
+      label: "Due today",
+      sub: "Tasks",
+      value: homeStats.dueToday,
+      icon: <Calendar size={18} />,
+      color: { bg: "#EDE9FE", color: "#6D28D9" },
+    },
+  ];
+
+  const menuItems = [
+    { key: "tasks", label: "Tasks", desc: "View, filter and manage all tasks", icon: <ListFilter size={18} />, color: { bg: "#FFE4D5", color: "#C2410C" } },
+    { key: "buildings", label: "Buildings", desc: "Manage properties and locations", icon: <Building2 size={18} />, color: { bg: "#D1FAE5", color: "#047857" } },
+    { key: "checklists", label: "Checklists", desc: "SOPs and inspections", icon: <ClipboardList size={18} />, color: { bg: "#EDE9FE", color: "#6D28D9" } },
+    { key: "analytics", label: "Analytics", desc: "Insights and performance data", icon: <BarChart2 size={18} />, color: { bg: "#CCFBF1", color: "#0F766E" } },
+    { key: "people", label: "People", desc: "Teams, assignees and contacts", icon: <Users size={18} />, color: { bg: "#FEF3C7", color: "#B45309" } },
+    { key: "reports", label: "Reports", desc: "Generate and view reports", icon: <FileText size={18} />, color: { bg: "#DBEAFE", color: "#1D4ED8" } },
+  ];
+
+  return (
+    <div className="px-4 pb-8 pt-3">
+      <div className="flex items-center justify-between mb-2 px-1">
+        <p className="text-xs font-semibold uppercase" style={{ color: "#8A7A5C", letterSpacing: "0.12em" }}>Overview</p>
+        <p className="text-xs flex items-center gap-1" style={{ color: "#8A7A5C" }}>
+          <Calendar size={11} />
+          {now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-6">
+        {statCards.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => onNavigate(c.key)}
+            className="flex items-center gap-3 px-3 py-3 rounded-2xl text-left transition-all active:scale-[0.98]"
+            style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}
+          >
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: c.color.bg, color: c.color.color }}>
+              {c.icon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>{c.label}</p>
+              <p className="text-xs truncate" style={{ color: c.overdue ? "#DC2626" : "#8A7A5C" }}>{c.sub}</p>
+            </div>
+            <p className="text-lg font-semibold flex-shrink-0" style={{ color: "#0F0F0F" }}>{c.value}</p>
+            <ChevronRight size={14} style={{ color: "#8A7A5C", flexShrink: 0 }} />
+          </button>
+        ))}
+      </div>
+
+      <p className="text-xs font-semibold uppercase mb-2 px-1" style={{ color: "#8A7A5C", letterSpacing: "0.12em" }}>Menu</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {menuItems.map((m) => (
+          <button
+            key={m.key}
+            type="button"
+            onClick={() => onNavigate(m.key)}
+            className="flex items-center gap-3 px-3 py-3 rounded-2xl text-left transition-all active:scale-[0.98]"
+            style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}
+          >
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: m.color.bg, color: m.color.color }}>
+              {m.icon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "#0F0F0F" }}>{m.label}</p>
+              <p className="text-xs truncate" style={{ color: "#8A7A5C" }}>{m.desc}</p>
+            </div>
+            <ChevronRight size={14} style={{ color: "#8A7A5C", flexShrink: 0 }} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------- People view ----------
+function PeopleView({ peopleStats, onSelectPerson }) {
+  return (
+    <div className="px-4 pb-8 pt-3">
+      <p className="text-xs font-semibold uppercase mb-2 px-1" style={{ color: "#8A7A5C", letterSpacing: "0.12em" }}>Team</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {peopleStats.map((p) => (
+          <button
+            key={p.name}
+            type="button"
+            onClick={() => onSelectPerson(p.name)}
+            className="flex items-center gap-3 px-3 py-3 rounded-2xl text-left transition-all active:scale-[0.98]"
+            style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}
+          >
+            <Avatar name={p.name} size={32} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate" style={{ color: "#0F0F0F" }}>{p.name}</p>
+              <p className="text-xs" style={{ color: "#8A7A5C" }}>{p.open} open · {p.total} total</p>
+            </div>
+            <ChevronRight size={14} style={{ color: "#8A7A5C", flexShrink: 0 }} />
+          </button>
+        ))}
       </div>
     </div>
   );
