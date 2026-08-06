@@ -2839,39 +2839,43 @@ export default function App() {
             <h1 className="font-display text-2xl mb-3" style={{ color: "#0F0F0F", fontWeight: 500 }}>Ops Dashboard</h1>
           )}
 
-          <PropertyDropdown value={activeProperty} onChange={setActiveProperty} options={propertyOptions} />
+          {activeView !== "home" && (
+            <>
+              <PropertyDropdown value={activeProperty} onChange={setActiveProperty} options={propertyOptions} />
 
-          <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
-            <Search size={15} style={{ color: "#8A7A5C" }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks, people, locations..." className="flex-1 bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
-            {search && <button onClick={() => setSearch("")}><X size={14} style={{ color: "#8A7A5C" }} /></button>}
-          </div>
-          {search.trim() && teamOptions.some((n) => n.toLowerCase() === search.trim().toLowerCase()) && (() => {
-            const matchedName = teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase());
-            return (
-              <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-xl fade-anim" style={{ background: "rgba(15,79,92,0.08)", border: "1px solid rgba(15,79,92,0.15)" }}>
-                <Avatar name={matchedName} size={18} />
-                <span className="text-xs font-medium flex-1" style={{ color: "#0F4C5C" }}>
-                  Showing all tasks for {matchedName}
-                </span>
-                <button
-                  disabled={pdfDownloading}
-                  onClick={async () => {
-                    setPdfDownloading(true);
-                    try { await downloadPersonPDF(matchedName, csvUrl); }
-                    catch (e) { alert("PDF failed: " + e.message); }
-                    finally { setPdfDownloading(false); }
-                  }}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95"
-                  style={{ background: "#0F4C5C", color: "white", opacity: pdfDownloading ? 0.6 : 1 }}
-                  title="Download outstanding tasks as PDF"
-                >
-                  {pdfDownloading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-                  PDF
-                </button>
+              <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                <Search size={15} style={{ color: "#8A7A5C" }} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks, people, locations..." className="flex-1 bg-transparent outline-none text-sm" style={{ color: "#0F0F0F" }} />
+                {search && <button onClick={() => setSearch("")}><X size={14} style={{ color: "#8A7A5C" }} /></button>}
               </div>
-            );
-          })()}
+              {search.trim() && teamOptions.some((n) => n.toLowerCase() === search.trim().toLowerCase()) && (() => {
+                const matchedName = teamOptions.find((n) => n.toLowerCase() === search.trim().toLowerCase());
+                return (
+                  <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-xl fade-anim" style={{ background: "rgba(15,79,92,0.08)", border: "1px solid rgba(15,79,92,0.15)" }}>
+                    <Avatar name={matchedName} size={18} />
+                    <span className="text-xs font-medium flex-1" style={{ color: "#0F4C5C" }}>
+                      Showing all tasks for {matchedName}
+                    </span>
+                    <button
+                      disabled={pdfDownloading}
+                      onClick={async () => {
+                        setPdfDownloading(true);
+                        try { await downloadPersonPDF(matchedName, csvUrl); }
+                        catch (e) { alert("PDF failed: " + e.message); }
+                        finally { setPdfDownloading(false); }
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all active:scale-95"
+                      style={{ background: "#0F4C5C", color: "white", opacity: pdfDownloading ? 0.6 : 1 }}
+                      title="Download outstanding tasks as PDF"
+                    >
+                      {pdfDownloading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                      PDF
+                    </button>
+                  </div>
+                );
+              })()}
+            </>
+          )}
         </div>
 
         {activeView === "tasks" && (
