@@ -561,8 +561,9 @@ function BuildingsPortfolio() {
 
       {/* Header */}
       <div style={{ background: "#0F0F0F", padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 20 }}>
-        <Link to="/" style={{ display: "flex", padding: 6, borderRadius: 8, background: "rgba(255,255,255,0.1)", color: "white" }}>
+        <Link to="/" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,0.1)", color: "white", textDecoration: "none", fontSize: 12, fontWeight: 600 }}>
           <ArrowLeft size={16} />
+          Home
         </Link>
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", margin: 0 }}>Portfolio</p>
@@ -1210,8 +1211,16 @@ function BuildingDetail() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", background: "#D4C7B0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Loader2 size={28} style={{ color: "#8A7A5C", animation: "spin 1s linear infinite" }} />
+      <div style={{ minHeight: "100vh", background: "#D4C7B0", display: "flex", flexDirection: "column" }}>
+        <div style={{ background: "#0F0F0F", padding: "14px 16px" }}>
+          <Link to="/buildings" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,0.1)", color: "white", textDecoration: "none", fontSize: 12, fontWeight: 600 }}>
+            <ArrowLeft size={16} />
+            Buildings
+          </Link>
+        </div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Loader2 size={28} style={{ color: "#8A7A5C", animation: "spin 1s linear infinite" }} />
+        </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
