@@ -2835,6 +2835,10 @@ export default function App() {
             </div>
           )}
 
+          {activeView === "home" && (
+            <h1 className="font-display text-2xl mb-3" style={{ color: "#0F0F0F", fontWeight: 500 }}>Ops Dashboard</h1>
+          )}
+
           <PropertyDropdown value={activeProperty} onChange={setActiveProperty} options={propertyOptions} />
 
           <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
