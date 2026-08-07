@@ -5199,13 +5199,14 @@ function ChecklistDashboard({ webhookUrl, onClose, initialTab = "checklists" }) 
     if (existingId) {
       const { error } = await supabase.from("checklist_submissions").update(record).eq("id", existingId);
       if (error) throw new Error(error.message || "Save failed");
+      fetchSubmissions();
+      return existingId;
     } else {
-      const { error } = await supabase.from("checklist_submissions").insert(record);
+      const { data, error } = await supabase.from("checklist_submissions").insert(record).select("id").single();
       if (error) throw new Error(error.message || "Save failed");
+      fetchSubmissions();
+      return data?.id || null;
     }
-    await fetchSubmissions();
-    setActiveId(null);
-    setEditingSubmission(null);
   };
 
   const archiveSubmission = async (id, archive) => {
