@@ -36,9 +36,11 @@ It runs on `push` and `pull_request` for `main`, installs dependencies with `npm
 
 Optional environment variables (set in Vercel), otherwise configured per device in Settings:
 
-- `VITE_TASKS_WEBHOOK_URL` — n8n webhook that writes task create/update/complete back to the Google Sheet
-- `VITE_WEBHOOK_URL` — n8n "Checklist Email" webhook for checklist submissions (not used for tasks)
+- `VITE_TASKS_WEBHOOK_URL` — n8n webhook that writes task create/update/complete back to the Google Sheet (`https://adaire.app.n8n.cloud/webhook/ops-tasks-app`). Overrides the webhook URL entered in Settings.
+- `VITE_WEBHOOK_URL` — n8n "Checklist Email" webhook for checklist submissions (`https://adaire.app.n8n.cloud/webhook/checklist-email`). Never used for tasks.
 - `VITE_CSV_URL`, `VITE_APP_PASSWORD`
+
+`VITE_` variables are baked into the bundle at build time, so after changing any of them in Vercel you must redeploy for the change to take effect.
 
 ## First-time setup after deploy
 

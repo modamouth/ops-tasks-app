@@ -2609,8 +2609,8 @@ export default function App() {
   }, [tasks, activeProperty]);
 
   const enqueueChange = useCallback((payload) => {
-    if (!webhookUrl) return;
-
+    // Queue even without a task webhook configured — flushPendingChanges won't
+    // send until one is set, so the change stays pending instead of being lost.
     if (payload.task?.image || payload.patch?.image) {
       const projected = queueBytes([...pendingQueue, { id: "tmp", payload }]);
       if (projected > STORAGE_WARN_BYTES) {
@@ -4359,7 +4359,7 @@ function SettingsSheet({ envCsvUrl, envWebhookUrl, envPassword, csvOverride, web
             <p className="text-sm mb-4" style={{ color: "#3F3A2E" }}>Connect your Google Sheet and n8n webhook.</p>
           )}
           <UrlField label="Published CSV URL (read)" value={csvManaged ? "Configured via Vercel" : c} onChange={setC} disabled={csvManaged} />
-          <UrlField label="n8n webhook URL (write)" value={webhookManaged ? "Configured via Vercel" : w} onChange={setW} disabled={webhookManaged} />
+          <UrlField label="Task sync webhook URL (write)" value={webhookManaged ? "Set by VITE_TASKS_WEBHOOK_URL — overrides this field" : w} onChange={setW} disabled={webhookManaged} />
           {(csvManaged || webhookManaged) && <p className="text-xs mt-3 mb-4" style={{ color: "#8A7A5C" }}>To change managed URLs, update environment variables in your Vercel project settings.</p>}
           <div className="rounded-xl px-4 py-3 mb-3" style={{ background: passwordManaged ? "#F0EBE0" : "white", border: "1px solid rgba(0,0,0,0.06)" }}>
             <div className="uppercase mb-1" style={{ color: "#8A7A5C", fontSize: "10px", letterSpacing: "0.15em" }}>App Password</div>
