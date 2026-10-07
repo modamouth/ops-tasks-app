@@ -34,7 +34,11 @@ Follow the prompts. Subsequent deploys: `vercel --prod`.
 This repository includes a GitHub Actions workflow at `.github/workflows/ci.yml`.
 It runs on `push` and `pull_request` for `main`, installs dependencies with `npm ci`, and verifies the app builds successfully with `npm run build`.
 
-No environment variables needed. CSV URL and webhook URL are stored in browser localStorage (per device).
+Optional environment variables (set in Vercel), otherwise configured per device in Settings:
+
+- `VITE_TASKS_WEBHOOK_URL` — n8n webhook that writes task create/update/complete back to the Google Sheet
+- `VITE_WEBHOOK_URL` — n8n "Checklist Email" webhook for checklist submissions (not used for tasks)
+- `VITE_CSV_URL`, `VITE_APP_PASSWORD`
 
 ## First-time setup after deploy
 

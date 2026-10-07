@@ -20,7 +20,10 @@ const supabase = createClient(
 
 // ---------- Environment-configured URLs (set in Vercel dashboard) ----------
 const ENV_CSV_URL = import.meta.env.VITE_CSV_URL || "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHe-qEY2VB71JlIVsx40UPWQGGMRXmAuJ0-hWKTmkvbrzJJt6jDJv2Evw9au27nX705LEwwPzkjLr8/pub?output=csv";
+// Checklist submissions (email + PDF) — n8n "Checklist Email" workflow.
 const ENV_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
+// Task create/update/complete write-back to the Google Sheet — separate n8n workflow.
+const ENV_TASKS_WEBHOOK_URL = import.meta.env.VITE_TASKS_WEBHOOK_URL || "";
 const ENV_APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "";
 
 // ---------- CONFIG ----------
@@ -2385,7 +2388,7 @@ export default function App() {
   const [sortBy, setSortBy] = usePersistedState("ops.sortBy", "overdue");
 
   const csvUrl = ENV_CSV_URL || csvOverride;
-  const webhookUrl = ENV_WEBHOOK_URL || webhookOverride;
+  const webhookUrl = ENV_TASKS_WEBHOOK_URL || webhookOverride;
   const appPassword = ENV_APP_PASSWORD || passwordOverride;
 
   const [authed, setAuthed] = useState(() => {
@@ -3012,7 +3015,7 @@ export default function App() {
         )}
         {checklistOpen && (
           <ChecklistDashboard
-            webhookUrl={webhookUrl}
+            webhookUrl={ENV_WEBHOOK_URL}
             initialTab={checklistInitialTab}
             onClose={() => setChecklistOpen(false)}
           />
@@ -3020,7 +3023,7 @@ export default function App() {
         {settingsOpen && (
           <SettingsSheet
             envCsvUrl={ENV_CSV_URL}
-            envWebhookUrl={ENV_WEBHOOK_URL}
+            envWebhookUrl={ENV_TASKS_WEBHOOK_URL}
             envPassword={ENV_APP_PASSWORD}
             csvOverride={csvOverride}
             webhookOverride={webhookOverride}
